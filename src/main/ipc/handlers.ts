@@ -28,6 +28,7 @@ import {
 import {
   getAgent,
   describeAgents,
+  getBoolSetting,
   isAgentAvailable,
   resolveLaunch,
   watchForNewSession,
@@ -49,6 +50,21 @@ import {
 } from '../git'
 import { addWorktree, removeWorktree } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
+import { getMessages, getTurns, getTurn, type MessageRow } from '../db'
+import { deleteSnapshots, diffSnapshotFiles, diffSnapshots, restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
+import {
+  sendMessage,
+  interrupt as interruptChat,
+  respondPermission,
+  setMode as setChatMode,
+  setModel as setChatModel,
+  getLiveState,
+  disposeSession
+} from '../session/manager'
+import type { UserInput } from '../agents/adapter'
+
+/** Setting that routes chat-capable agents to chat mode instead of a terminal. */
+const CHAT_MODE = 'RELAY_CHAT_MODE'
 
 // Per-task input buffer to reconstruct full lines from character-by-character PTY writes
 const inputBuffers = new Map<string, string>()
@@ -126,7 +142,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:getById', (_, id: string) => getTaskById(id))
   ipcMain.handle(
     'tasks:create',
-    (_, { projectId, title, prompt, processType, branch, cwd, cols = 80, rows = 24 }) => {
+    (_, { projectId, title, prompt, processType, branch, cwd, model, mode, cols = 80, rows = 24 }) => {
       const id = randomUUID()
 
       // Create an isolated git worktree for this task so multiple tasks can run
@@ -155,6 +171,9 @@ export function registerIpcHandlers(): void {
       // Record the HEAD commit at session start so the Files tab can scope the diff
       const startCommit = effectiveCwd ? getCurrentCommit(effectiveCwd) : ''
 
+      const agent = getAgent(processType)
+      const transport = agent.chat && getBoolSetting(CHAT_MODE, true) ? 'chat' : 'pty'
+
       insertTask({
         id,
         project_id: projectId,
@@ -163,7 +182,10 @@ export function registerIpcHandlers(): void {
         process_type: processType,
         branch,
         worktree_path: worktreePath || undefined,
-        metadata: JSON.stringify({ startCommit })
+        metadata: JSON.stringify({ startCommit }),
+        transport,
+        model,
+        mode
       })
 
       const eventId = randomUUID()
@@ -189,16 +211,17 @@ export function registerIpcHandlers(): void {
         })
       }
 
-      startAgentSession({
-        taskId: id,
-        agent: getAgent(processType),
-        cwd: effectiveCwd,
-        prompt,
-        cols,
-        rows
-      })
+      if (transport === 'chat') {
+        sendMessage(id, { text: prompt }).catch((err) => {
+          console.error('[relay] chat session failed to start:', err)
+          updateTaskStatus(id, 'failed')
+          BrowserWindow.getAllWindows()[0]?.webContents.send('task:status', { taskId: id, status: 'failed' })
+        })
+      } else {
+        startAgentSession({ taskId: id, agent, cwd: effectiveCwd, prompt, cols, rows })
+      }
 
-      return { id, projectId, title, prompt, processType, branch, status: 'running' }
+      return { id, projectId, title, prompt, processType, branch, status: 'running', transport }
     }
   )
 
@@ -227,8 +250,9 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
   ipcMain.handle('tasks:getLogs', (_, taskId: string) => getTerminalLogs(taskId))
-  ipcMain.handle('tasks:delete', (_, id: string) => {
+  ipcMain.handle('tasks:delete', async (_, id: string) => {
     killPtySession(id)
+    await disposeSession(id)
     deleteTask(id)
     return { success: true }
   })
@@ -307,7 +331,7 @@ export function registerIpcHandlers(): void {
   })
 
   // --- Worktree ---
-  ipcMain.handle('worktree:remove', (_, { taskId, force }: { taskId: string; force?: boolean }) => {
+  ipcMain.handle('worktree:remove', async (_, { taskId, force }: { taskId: string; force?: boolean }) => {
     const task = getTaskById(taskId) as {
       project_path: string
       worktree_path?: string
@@ -318,8 +342,61 @@ export function registerIpcHandlers(): void {
 
     // Stop any running session first
     killPtySession(taskId)
+    await disposeSession(taskId)
+    deleteSnapshots(task.worktree_path, taskId)
 
     return removeWorktree(task.project_path, task.worktree_path, force ?? false)
+  })
+
+  // --- Chat ---
+  ipcMain.handle('chat:send', (_, { taskId, input }: { taskId: string; input: UserInput }) =>
+    sendMessage(taskId, input)
+  )
+  ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
+  ipcMain.handle('chat:permission', (_, { taskId, requestId, optionId }: { taskId: string; requestId: string; optionId: string }) =>
+    respondPermission(taskId, requestId, optionId)
+  )
+  ipcMain.handle('chat:setMode', (_, { taskId, mode }: { taskId: string; mode: string }) => setChatMode(taskId, mode))
+  ipcMain.handle('chat:setModel', (_, { taskId, model }: { taskId: string; model: string }) => setChatModel(taskId, model))
+  ipcMain.handle(
+    'chat:history',
+    (_, { taskId, beforeSeq, limit }: { taskId: string; beforeSeq?: number; limit?: number }): MessageRow[] =>
+      getMessages(taskId, { beforeSeq, limit })
+  )
+  ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
+
+  // --- Turns (per-turn history of file changes) ---
+  ipcMain.handle('turns:list', (_, taskId: string) => {
+    const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
+    if (!task) return []
+    const cwd = task.worktree_path || task.project_path
+    return getTurns(taskId).map((t) => ({
+      ...t,
+      files: t.commit_before && t.commit_after ? diffSnapshotFiles(cwd, t.commit_before, t.commit_after) : []
+    }))
+  })
+  ipcMain.handle('turns:diff', (_, { taskId, turnId, path }: { taskId: string; turnId: string; path?: string }) => {
+    const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
+    const turn = getTurn(turnId)
+    if (!task || !turn?.commit_before || !turn.commit_after) return ''
+    return diffSnapshots(task.worktree_path || task.project_path, turn.commit_before, turn.commit_after, path)
+  })
+  ipcMain.handle('turns:revert', (_, { taskId, turnId }: { taskId: string; turnId: string }) => {
+    const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
+    const turn = getTurn(turnId)
+    if (!task || !turn?.commit_before) return { success: false, error: 'Nothing to revert to' }
+    const cwd = task.worktree_path || task.project_path
+    const current = snapshotWorkingTree(cwd, taskId, `revert-${Date.now()}`)
+    if (!current) return { success: false, error: 'Not a git repository' }
+    const ok = restoreSnapshot(cwd, turn.commit_before, current)
+    insertTaskEvent({
+      id: randomUUID(),
+      task_id: taskId,
+      type: 'system',
+      content: ok ? 'Reverted files to the state before a turn' : 'Revert failed',
+      metadata: JSON.stringify({ turnId })
+    })
+    return { success: ok }
   })
 
   // --- Agents ---

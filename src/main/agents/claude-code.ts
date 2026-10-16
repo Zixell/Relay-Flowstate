@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync, readdirSync } from 'fs'
 import type { AgentDefinition } from './types'
 import { UUID_RE_SOURCE } from './session-watcher'
+import { claudeChat } from './claude-chat'
 
 const SKIP_PERMISSIONS = 'CLAUDE_SKIP_PERMISSIONS'
 
@@ -85,6 +86,8 @@ export const claudeCodeAgent: AgentDefinition = {
     args: ['--print', '--dangerously-skip-permissions'],
     promptVia: 'stdin'
   },
+
+  chat: claudeChat,
 
   settings: [
     {

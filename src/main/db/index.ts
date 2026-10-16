@@ -17,10 +17,10 @@ export function initDatabase(): void {
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  createSchema()
+  createSchema(db)
 }
 
-function createSchema(): void {
+function createSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -101,6 +101,43 @@ function createSchema(): void {
       created_at INTEGER NOT NULL DEFAULT (unixepoch())
     )`)
   } catch { /* already exists */ }
+
+  // --- Chat mode ---
+  // `transport` tells how the task talks to its agent: 'pty' (legacy terminal)
+  // or 'chat' (structured adapter, see src/main/agents/adapter.ts).
+  try { db.exec("ALTER TABLE tasks ADD COLUMN transport TEXT NOT NULL DEFAULT 'pty'") } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE tasks ADD COLUMN model TEXT') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT') } catch { /* already exists */ }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS turns (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      commit_before TEXT,
+      commit_after TEXT,
+      usage_json TEXT,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_turns_task ON turns(task_id, seq);
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      turn_id TEXT REFERENCES turns(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT,
+      tool_call_id TEXT,
+      tool_status TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_messages_tool ON messages(task_id, tool_call_id);
+  `)
 }
 
 // --- Project queries ---
@@ -169,16 +206,22 @@ export function insertTask(task: {
   branch?: string
   worktree_path?: string
   metadata?: string
+  transport?: 'pty' | 'chat'
+  model?: string
+  mode?: string
 }) {
   if (!db) return
   db.prepare(
-    `INSERT INTO tasks (id, project_id, title, prompt, process_type, branch, worktree_path, status, started_at, metadata)
-     VALUES (@id, @project_id, @title, @prompt, @process_type, @branch, @worktree_path, 'running', unixepoch(), @metadata)`
+    `INSERT INTO tasks (id, project_id, title, prompt, process_type, branch, worktree_path, status, started_at, metadata, transport, model, mode)
+     VALUES (@id, @project_id, @title, @prompt, @process_type, @branch, @worktree_path, 'running', unixepoch(), @metadata, @transport, @model, @mode)`
   ).run({
     ...task,
     branch: task.branch ?? null,
     worktree_path: task.worktree_path ?? null,
-    metadata: task.metadata ?? '{}'
+    metadata: task.metadata ?? '{}',
+    transport: task.transport ?? 'pty',
+    model: task.model ?? null,
+    mode: task.mode ?? null
   })
 }
 
@@ -312,3 +355,138 @@ export function insertTerminalLog(taskId: string, data: string) {
   db.prepare('INSERT INTO terminal_logs (task_id, data) VALUES (?, ?)').run(taskId, data)
 }
 
+
+// --- Chat: turns ---
+export interface TurnRow {
+  id: string
+  task_id: string
+  seq: number
+  status: 'running' | 'completed' | 'interrupted' | 'failed'
+  commit_before: string | null
+  commit_after: string | null
+  usage_json: string | null
+  started_at: number
+  completed_at: number | null
+}
+
+export function insertTurn(turn: { id: string; task_id: string; commit_before?: string }): TurnRow | undefined {
+  if (!db) return undefined
+  const seq = (db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM turns WHERE task_id = ?').get(turn.task_id) as { n: number }).n
+  db.prepare(
+    `INSERT INTO turns (id, task_id, seq, status, commit_before, started_at)
+     VALUES (?, ?, ?, 'running', ?, unixepoch())`
+  ).run(turn.id, turn.task_id, seq, turn.commit_before ?? null)
+  return db.prepare('SELECT * FROM turns WHERE id = ?').get(turn.id) as TurnRow
+}
+
+export function completeTurn(id: string, fields: { status: TurnRow['status']; commit_after?: string; usage_json?: string }): void {
+  if (!db) return
+  db.prepare(
+    `UPDATE turns SET status = ?, commit_after = COALESCE(?, commit_after),
+     usage_json = COALESCE(?, usage_json), completed_at = unixepoch() WHERE id = ?`
+  ).run(fields.status, fields.commit_after ?? null, fields.usage_json ?? null, id)
+}
+
+export function getTurns(taskId: string): TurnRow[] {
+  if (!db) return []
+  return db.prepare('SELECT * FROM turns WHERE task_id = ? ORDER BY seq ASC').all(taskId) as TurnRow[]
+}
+
+export function getTurn(id: string): TurnRow | undefined {
+  if (!db) return undefined
+  return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as TurnRow | undefined
+}
+
+/** Total seconds spent in turns — the chat-mode runtime of a task. */
+export function getTurnsRuntimeSeconds(taskId: string): number {
+  if (!db) return 0
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(COALESCE(completed_at, unixepoch()) - started_at), 0) AS s FROM turns WHERE task_id = ?`
+  ).get(taskId) as { s: number }
+  return row.s
+}
+
+/** On app start, turns cannot still be in flight. */
+export function resetRunningTurns(): void {
+  if (!db) return
+  db.prepare(`UPDATE turns SET status = 'interrupted', completed_at = unixepoch() WHERE status = 'running'`).run()
+  // The agent process that asked is gone, so nobody can answer these anymore.
+  db.prepare(`UPDATE messages SET tool_status = 'expired' WHERE kind = 'permission' AND tool_status = 'pending'`).run()
+  db.prepare(`UPDATE messages SET tool_status = 'error' WHERE kind = 'tool_call' AND tool_status = 'running'`).run()
+}
+
+// --- Chat: messages ---
+export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
+export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error'
+
+export interface MessageRow {
+  id: string
+  task_id: string
+  turn_id: string | null
+  seq: number
+  role: MessageRole
+  kind: MessageKind
+  /** Text, or JSON for structured kinds (tool_call, permission, plan). */
+  content: string | null
+  tool_call_id: string | null
+  tool_status: string | null
+  created_at: number
+  updated_at: number
+}
+
+export function insertMessage(msg: {
+  id: string
+  task_id: string
+  turn_id?: string | null
+  role: MessageRole
+  kind: MessageKind
+  content?: string | null
+  tool_call_id?: string | null
+  tool_status?: string | null
+}): MessageRow | undefined {
+  if (!db) return undefined
+  const seq = (db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM messages WHERE task_id = ?').get(msg.task_id) as { n: number }).n
+  const now = Date.now()
+  db.prepare(
+    `INSERT INTO messages (id, task_id, turn_id, seq, role, kind, content, tool_call_id, tool_status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    msg.id, msg.task_id, msg.turn_id ?? null, seq, msg.role, msg.kind,
+    msg.content ?? null, msg.tool_call_id ?? null, msg.tool_status ?? null, now, now
+  )
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(msg.id) as MessageRow
+}
+
+export function updateMessage(id: string, fields: { content?: string; tool_status?: string }): MessageRow | undefined {
+  if (!db) return undefined
+  db.prepare(
+    `UPDATE messages SET content = COALESCE(?, content), tool_status = COALESCE(?, tool_status), updated_at = ? WHERE id = ?`
+  ).run(fields.content ?? null, fields.tool_status ?? null, Date.now(), id)
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined
+}
+
+export function getMessageByToolCall(taskId: string, toolCallId: string): MessageRow | undefined {
+  if (!db) return undefined
+  return db
+    .prepare(`SELECT * FROM messages WHERE task_id = ? AND tool_call_id = ? AND kind = 'tool_call'`)
+    .get(taskId, toolCallId) as MessageRow | undefined
+}
+
+/** A page of history, newest last. `beforeSeq` pages backwards. */
+export function getMessages(taskId: string, opts: { beforeSeq?: number; limit?: number } = {}): MessageRow[] {
+  if (!db) return []
+  const limit = opts.limit ?? 500
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages WHERE task_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?`
+    )
+    .all(taskId, opts.beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[]
+  return rows.reverse()
+}
+
+export function updateTaskChatSettings(id: string, fields: { model?: string; mode?: string }): void {
+  if (!db) return
+  db.prepare(
+    'UPDATE tasks SET model = COALESCE(?, model), mode = COALESCE(?, mode), updated_at = unixepoch() WHERE id = ?'
+  ).run(fields.model ?? null, fields.mode ?? null, id)
+}

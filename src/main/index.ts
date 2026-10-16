@@ -2,7 +2,8 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { net } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDatabase, resetRunningTasks, getLockedTaskIds } from './db'
+import { initDatabase, resetRunningTasks, resetRunningTurns, getLockedTaskIds } from './db'
+import { disposeAllSessions } from './session/manager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { killAllSessions, initLockedStatuses } from './pty/manager'
 import { loadSettings } from './settings'
@@ -85,6 +86,7 @@ app.whenReady().then(() => {
   try {
     initDatabase()
     resetRunningTasks()
+    resetRunningTurns()
     initLockedStatuses(getLockedTaskIds())
     loadSettings()
   } catch (err) {
@@ -100,6 +102,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   killAllSessions()
+  void disposeAllSessions()
 })
 
 app.on('window-all-closed', () => {

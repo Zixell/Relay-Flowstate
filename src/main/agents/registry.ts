@@ -81,6 +81,7 @@ export function describeAgents(): AgentDescriptor[] {
     available: a.enabled ? isAgentAvailable(a.id) : false,
     supportsResume: typeof a.buildResumeCommand === 'function',
     supportsSummaries: Boolean(a.headless),
+    chat: a.chat?.capabilities,
     settings: a.settings
   }))
 }

@@ -8,6 +8,8 @@
  */
 
 /** Stable identifier persisted in `tasks.process_type`. Never change existing ids. */
+import type { ChatSupport, AgentCapabilities } from './adapter'
+
 export type AgentId = string
 
 /** A command to run: executable + argv. */
@@ -129,6 +131,12 @@ export interface AgentDefinition {
 
   /** Agent-specific toggles surfaced in the Settings modal. */
   settings: AgentSettingDef[]
+
+  /**
+   * Structured (chat-mode) driver. Agents without it can only run in the
+   * legacy terminal mode.
+   */
+  chat?: ChatSupport
 }
 
 /** Serializable view of an agent, sent to the renderer over IPC. */
@@ -142,5 +150,7 @@ export interface AgentDescriptor {
   available: boolean
   supportsResume: boolean
   supportsSummaries: boolean
+  /** Present when the agent can run in chat mode. */
+  chat?: AgentCapabilities
   settings: AgentSettingDef[]
 }
