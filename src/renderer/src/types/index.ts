@@ -79,7 +79,7 @@ export interface Task {
 export interface TaskEvent {
   id: string
   task_id: string
-  type: 'user_prompt' | 'ai_response' | 'file_change' | 'git_snapshot' | 'system' | 'error' | 'git_merge'
+  type: 'user_prompt' | 'ai_response' | 'file_change' | 'git_snapshot' | 'system' | 'error' | 'git_merge' | 'turn_completed'
   content?: string
   timestamp: number
   metadata?: string

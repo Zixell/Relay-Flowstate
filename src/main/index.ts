@@ -62,22 +62,33 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Window control IPC
-  ipcMain.on('window:minimize', () => mainWindow.minimize())
-  ipcMain.on('window:maximize', () => {
-    if (mainWindow.isMaximized()) mainWindow.unmaximize()
-    else mainWindow.maximize()
+}
+
+/**
+ * Window-level IPC. Registered once per app run, not per window: on macOS the
+ * window is re-created from the dock (`activate`), and registering a handler
+ * twice throws. Each call acts on the window that sent it.
+ */
+function registerWindowHandlers(): void {
+  const senderWindow = (e: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): BrowserWindow | null =>
+    BrowserWindow.fromWebContents(e.sender)
+
+  ipcMain.on('window:minimize', (e) => senderWindow(e)?.minimize())
+  ipcMain.on('window:maximize', (e) => {
+    const win = senderWindow(e)
+    if (!win) return
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
   })
-  ipcMain.on('window:close', () => mainWindow.close())
+  ipcMain.on('window:close', (e) => senderWindow(e)?.close())
 
   // Folder picker
-  ipcMain.handle('dialog:openFolder', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openDirectory']
-    })
+  ipcMain.handle('dialog:openFolder', async (e) => {
+    const win = senderWindow(e)
+    const options: Electron.OpenDialogOptions = { properties: ['openDirectory'] }
+    const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     return result.canceled ? null : result.filePaths[0]
   })
-
 }
 
 app.whenReady().then(() => {
@@ -97,6 +108,7 @@ app.whenReady().then(() => {
     console.warn('[relay] DB init failed (native bindings not built?):', err)
   }
   registerIpcHandlers()
+  registerWindowHandlers()
   createWindow()
 
   app.on('activate', function () {

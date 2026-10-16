@@ -374,9 +374,15 @@ export function registerIpcHandlers(): void {
   })
 
   // --- Chat ---
-  ipcMain.handle('chat:send', (_, { taskId, input }: { taskId: string; input: UserInput }) =>
-    sendMessage(taskId, input)
-  )
+  ipcMain.handle('chat:send', (_, { taskId, input }: { taskId: string; input: UserInput }) => {
+    // Follow-ups show up on the timeline like the initial prompt (logged by tasks:create).
+    if (input.text.trim()) {
+      const event = { id: randomUUID(), task_id: taskId, type: 'user_prompt', content: input.text }
+      insertTaskEvent(event)
+      emitTaskEvent({ ...event, metadata: null, timestamp: Math.floor(Date.now() / 1000) })
+    }
+    return sendMessage(taskId, input)
+  })
   ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
   ipcMain.handle('chat:permission', (_, { taskId, requestId, optionId }: { taskId: string; requestId: string; optionId: string }) =>
     respondPermission(taskId, requestId, optionId)

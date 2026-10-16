@@ -54,7 +54,9 @@ const api = {
     onEvent: (taskId: string, callback: (event: unknown) => void) => {
       const listener = (_: Electron.IpcRendererEvent, event: unknown) => callback(event)
       ipcRenderer.on(`tasks:event:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`tasks:event:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`tasks:event:${taskId}`, listener)
+      }
     },
     delete: (id: string) => ipcRenderer.invoke('tasks:delete', id)
   },
@@ -196,7 +198,9 @@ const api = {
     onSummary: (taskId: string, callback: (summary: string) => void) => {
       const listener = (_: Electron.IpcRendererEvent, summary: string) => callback(summary)
       ipcRenderer.on(`pty:summary:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`pty:summary:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`pty:summary:${taskId}`, listener)
+      }
     }
   }
 }

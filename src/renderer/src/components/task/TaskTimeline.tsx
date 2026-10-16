@@ -7,7 +7,7 @@ import {
   GitMerge,
   Zap,
   AlertCircle,
-  Clock
+  CheckCircle2
 } from 'lucide-react'
 import { cn, formatTimestamp } from '../../lib/utils'
 import type { TaskEvent } from '../../types'
@@ -67,7 +67,8 @@ export function TaskTimeline({ taskId }: TaskTimelineProps) {
 }
 
 function TimelineEvent({ event, isLast }: { event: TaskEvent; isLast: boolean }) {
-  const config = EVENT_CONFIG[event.type]
+  // Unknown types (e.g. written by a newer build) render as system events, never crash.
+  const config = EVENT_CONFIG[event.type] ?? EVENT_CONFIG.system
 
   return (
     <div className="flex gap-3 group">
@@ -95,12 +96,40 @@ function TimelineEvent({ event, isLast }: { event: TaskEvent; isLast: boolean })
           <FileChangeList content={event.content} />
         ) : event.type === 'git_merge' && event.content ? (
           <MergeEventContent content={event.content} />
+        ) : event.type === 'turn_completed' ? (
+          <TurnEventContent event={event} />
         ) : event.content ? (
           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">
             {event.content}
           </p>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+/** A finished chat turn: how it ended and which files it touched. */
+function TurnEventContent({ event }: { event: TaskEvent }) {
+  let meta: { reason?: string; files?: string[] } = {}
+  try {
+    meta = event.metadata ? JSON.parse(event.metadata) : {}
+  } catch {
+    // keep defaults
+  }
+  const files = meta.files ?? []
+  const ended = meta.reason === 'interrupted' ? 'Interrupted' : meta.reason === 'error' ? 'Ended with an error' : null
+  return (
+    <div className="space-y-1">
+      {ended && <p className="text-xs text-zinc-500">{ended}</p>}
+      {files.length === 0 ? (
+        <p className="text-xs text-zinc-500">No file changes</p>
+      ) : (
+        files.map((f) => (
+          <div key={f} className="text-[11px] font-mono text-zinc-300 truncate">
+            {f}
+          </div>
+        ))
+      )}
     </div>
   )
 }
@@ -201,6 +230,12 @@ const EVENT_CONFIG: Record<
     iconBg: 'bg-red-400/10',
     label: 'Error',
     labelColor: 'text-red-400'
+  },
+  turn_completed: {
+    icon: <CheckCircle2 className="w-3 h-3 text-blue-400" />,
+    iconBg: 'bg-blue-400/10',
+    label: 'Turn',
+    labelColor: 'text-blue-400'
   },
   git_merge: {
     icon: <GitMerge className="w-3 h-3 text-emerald-400" />,
