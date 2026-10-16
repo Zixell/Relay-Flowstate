@@ -9,13 +9,50 @@ import {
 } from '../ui/dialog'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
-import type { AgentDescriptor } from '../../types'
+import type { AgentDescriptor, AgentSettingDef } from '../../types'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
 interface SettingsModalProps {
   open: boolean
   onClose: () => void
+}
+
+/** App-wide settings, not tied to one agent. */
+const GENERAL_SETTINGS: AgentSettingDef[] = [
+  {
+    key: 'RELAY_CHAT_MODE',
+    label: 'Chat mode',
+    description:
+      'New tasks for agents that support it open as a chat (structured session with permission prompts and per-turn history) instead of a terminal. Each chat task still has a plain Console tab in its worktree. Existing tasks keep their mode.',
+    type: 'boolean',
+    default: true
+  }
+]
+
+function SettingRow({ def, value, onToggle }: { def: AgentSettingDef; value: boolean; onToggle: (key: string, next: boolean) => void }) {
+  return (
+    <div className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+      <button
+        role="checkbox"
+        aria-checked={value}
+        onClick={() => onToggle(def.key, !value)}
+        className={cn(
+          'relative mt-0.5 w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 focus:outline-none',
+          value ? 'bg-violet-500' : 'bg-zinc-700'
+        )}
+      >
+        <span className={cn(
+          'absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform duration-200',
+          value ? 'translate-x-[14px]' : 'translate-x-0'
+        )} />
+      </button>
+      <div>
+        <p className="text-xs font-medium text-zinc-200 leading-snug">{def.label}</p>
+        <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">{def.description}</p>
+      </div>
+    </div>
+  )
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
@@ -35,7 +72,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (!open || !isElectron) return
     let cancelled = false
-    const defs = agents.flatMap((a) => a.settings)
+    const defs = [...GENERAL_SETTINGS, ...agents.flatMap((a) => a.settings)]
     Promise.all(
       defs.map(async (def) => {
         const raw: string = await window.api.settings.get(def.key)
@@ -66,6 +103,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         <div className="flex flex-col gap-5 px-6 pb-6 pt-1 max-h-[70vh] overflow-y-auto">
 
+          {/* General */}
+          <div className="flex flex-col gap-3">
+            {GENERAL_SETTINGS.map((def) => (
+              <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onToggle={toggle} />
+            ))}
+          </div>
+
+          <div className="h-px bg-white/[0.05]" />
+
           {/* Agent CLI status */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
@@ -73,8 +119,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
               <span className="text-sm font-medium text-zinc-200">Agent CLIs</span>
             </div>
             <p className="text-xs text-zinc-500 leading-relaxed">
-              Tasks run in a real terminal using the agent's own CLI. Session summaries
-              are generated locally by whichever agent CLI is installed — no API credits required.
+              Agents run through your own installed CLI and its login. Session summaries
+              are generated locally by whichever agent CLI is installed.
             </p>
 
             <div className="flex flex-col gap-2">
@@ -127,31 +173,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
 
                   {agent.settings.map((def) => (
-                    <div
-                      key={def.key}
-                      className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]"
-                    >
-                      <button
-                        role="checkbox"
-                        aria-checked={values[def.key] ?? def.default}
-                        onClick={() => toggle(def.key, !(values[def.key] ?? def.default))}
-                        className={cn(
-                          'relative mt-0.5 w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 focus:outline-none',
-                          (values[def.key] ?? def.default) ? 'bg-violet-500' : 'bg-zinc-700'
-                        )}
-                      >
-                        <span className={cn(
-                          'absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform duration-200',
-                          (values[def.key] ?? def.default) ? 'translate-x-[14px]' : 'translate-x-0'
-                        )} />
-                      </button>
-                      <div>
-                        <p className="text-xs font-medium text-zinc-200 leading-snug">{def.label}</p>
-                        <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
-                          {def.description}
-                        </p>
-                      </div>
-                    </div>
+                    <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onToggle={toggle} />
                   ))}
                 </div>
               </React.Fragment>

@@ -62,6 +62,7 @@ import {
   disposeSession
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
+import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
 /** Setting that routes chat-capable agents to chat mode instead of a terminal. */
 const CHAT_MODE = 'RELAY_CHAT_MODE'
@@ -252,6 +253,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:getLogs', (_, taskId: string) => getTerminalLogs(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {
     killPtySession(id)
+    closeConsole(id)
     await disposeSession(id)
     deleteTask(id)
     return { success: true }
@@ -342,6 +344,7 @@ export function registerIpcHandlers(): void {
 
     // Stop any running session first
     killPtySession(taskId)
+    closeConsole(taskId)
     await disposeSession(taskId)
     deleteSnapshots(task.worktree_path, taskId)
 
@@ -364,6 +367,18 @@ export function registerIpcHandlers(): void {
       getMessages(taskId, { beforeSeq, limit })
   )
   ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
+
+  // --- Sidecar console (plain shell in the task's worktree, no agent logic) ---
+  ipcMain.handle('console:open', (_, { taskId, cols, rows }: { taskId: string; cols: number; rows: number }) => {
+    const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
+    if (!task) throw new Error('Task not found')
+    return openConsole(taskId, task.worktree_path || task.project_path, cols, rows)
+  })
+  ipcMain.handle('console:write', (_, { taskId, data }: { taskId: string; data: string }) => writeConsole(taskId, data))
+  ipcMain.handle('console:resize', (_, { taskId, cols, rows }: { taskId: string; cols: number; rows: number }) =>
+    resizeConsole(taskId, cols, rows)
+  )
+  ipcMain.handle('console:close', (_, taskId: string) => closeConsole(taskId))
 
   // --- Turns (per-turn history of file changes) ---
   ipcMain.handle('turns:list', (_, taskId: string) => {

@@ -32,6 +32,8 @@ const api = {
       processType: string
       branch?: string
       cwd?: string
+      model?: string
+      mode?: string
     }) => ipcRenderer.invoke('tasks:create', data),
     updateStatus: (data: {
       id: string
@@ -90,6 +92,67 @@ const api = {
     merge: (cwd: string, branch: string, targetBranch?: string) => ipcRenderer.invoke('git:merge', { cwd, branch, targetBranch }),
     commitAndMerge: (taskId: string, worktreeCwd: string, projectCwd: string, targetBranch: string, commitMessage: string) =>
       ipcRenderer.invoke('git:commitAndMerge', { taskId, worktreeCwd, projectCwd, targetBranch, commitMessage })
+  },
+
+  // Chat mode (structured agent sessions)
+  chat: {
+    send: (taskId: string, input: { text: string; images?: { mediaType: string; data: string }[] }) =>
+      ipcRenderer.invoke('chat:send', { taskId, input }),
+    interrupt: (taskId: string) => ipcRenderer.invoke('chat:interrupt', taskId),
+    respondPermission: (taskId: string, requestId: string, optionId: string) =>
+      ipcRenderer.invoke('chat:permission', { taskId, requestId, optionId }),
+    setMode: (taskId: string, mode: string) => ipcRenderer.invoke('chat:setMode', { taskId, mode }),
+    setModel: (taskId: string, model: string) => ipcRenderer.invoke('chat:setModel', { taskId, model }),
+    history: (taskId: string, opts?: { beforeSeq?: number; limit?: number }) =>
+      ipcRenderer.invoke('chat:history', { taskId, ...opts }),
+    live: (taskId: string) => ipcRenderer.invoke('chat:live', taskId),
+    onEvent: (taskId: string, callback: (payload: unknown) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
+      ipcRenderer.on(`chat:event:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`chat:event:${taskId}`, listener)
+      }
+    },
+    /** Status changes of every chat-mode task. */
+    onTaskStatus: (callback: (payload: { taskId: string; status: string; changedFilesCount?: number }) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: { taskId: string; status: string; changedFilesCount?: number }) =>
+        callback(payload)
+      ipcRenderer.on('task:status', listener)
+      return () => {
+        ipcRenderer.removeListener('task:status', listener)
+      }
+    }
+  },
+
+  // Sidecar console — a plain shell in the task's worktree
+  console: {
+    open: (taskId: string, cols: number, rows: number): Promise<{ available: boolean; scrollback: string }> =>
+      ipcRenderer.invoke('console:open', { taskId, cols, rows }),
+    write: (taskId: string, data: string) => ipcRenderer.invoke('console:write', { taskId, data }),
+    resize: (taskId: string, cols: number, rows: number) => ipcRenderer.invoke('console:resize', { taskId, cols, rows }),
+    close: (taskId: string) => ipcRenderer.invoke('console:close', taskId),
+    onData: (taskId: string, callback: (data: string) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, data: string) => callback(data)
+      ipcRenderer.on(`console:data:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`console:data:${taskId}`, listener)
+      }
+    },
+    onExit: (taskId: string, callback: () => void) => {
+      const listener = () => callback()
+      ipcRenderer.on(`console:exit:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`console:exit:${taskId}`, listener)
+      }
+    }
+  },
+
+  // Per-turn history of file changes
+  turns: {
+    list: (taskId: string) => ipcRenderer.invoke('turns:list', taskId),
+    diff: (taskId: string, turnId: string, path?: string): Promise<string> =>
+      ipcRenderer.invoke('turns:diff', { taskId, turnId, path }),
+    revert: (taskId: string, turnId: string) => ipcRenderer.invoke('turns:revert', { taskId, turnId })
   },
 
   // PTY

@@ -19,7 +19,7 @@ function restartLabel(resumeMode?: string): string {
   return 'New session started'
 }
 
-const XTERM_THEME = {
+export const XTERM_THEME = {
   background: '#0a0a0a',
   foreground: '#e4e4e7',
   cursor: '#a1a1aa',

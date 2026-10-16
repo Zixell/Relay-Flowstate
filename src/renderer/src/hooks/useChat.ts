@@ -1,0 +1,90 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { applyChatEvent, emptyChat, type ChatState } from '../stores/chatReducer'
+import type { ChatEventPayload, ChatMessage, PlanItem, TurnInfo } from '../types'
+
+const isElectron = typeof window !== 'undefined' && !!window.api
+
+export interface ChatHandle {
+  state: ChatState
+  turns: TurnInfo[]
+  loading: boolean
+  send: (text: string, images?: { mediaType: string; data: string }[]) => Promise<void>
+  interrupt: () => Promise<void>
+  respondPermission: (requestId: string, optionId: string) => Promise<void>
+  refreshTurns: () => Promise<void>
+}
+
+/** History, live stream and actions of one chat-mode task. */
+export function useChat(taskId: string): ChatHandle {
+  const [state, setState] = useState<ChatState>(emptyChat)
+  const [turns, setTurns] = useState<TurnInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const pending = useRef<ChatEventPayload[] | null>([])
+
+  const refreshTurns = useCallback(async () => {
+    if (!isElectron) return
+    setTurns((await window.api.turns.list(taskId)) as TurnInfo[])
+  }, [taskId])
+
+  useEffect(() => {
+    if (!isElectron) return
+    let cancelled = false
+    setState(emptyChat())
+    setLoading(true)
+    pending.current = []
+
+    // Subscribe first so nothing streamed during the history load is lost.
+    const unsub = window.api.chat.onEvent(taskId, (raw) => {
+      const payload = raw as ChatEventPayload
+      if (pending.current) pending.current.push(payload)
+      else setState((s) => applyChatEvent(s, payload))
+      if (payload.event.type === 'turn.completed') void refreshTurns()
+    })
+
+    Promise.all([
+      window.api.chat.history(taskId) as Promise<ChatMessage[]>,
+      window.api.chat.live(taskId) as Promise<{ active: boolean; streaming: Record<string, string>; plan: PlanItem[] }>
+    ]).then(([messages, liveState]) => {
+      if (cancelled) return
+      let s: ChatState = {
+        ...emptyChat(),
+        messages,
+        streaming: liveState.streaming,
+        streamingOrder: Object.keys(liveState.streaming),
+        plan: liveState.plan,
+        inTurn: Object.keys(liveState.streaming).length > 0
+      }
+      for (const p of pending.current ?? []) s = applyChatEvent(s, p)
+      pending.current = null
+      setState(s)
+      setLoading(false)
+    })
+    void refreshTurns()
+
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [taskId, refreshTurns])
+
+  const send = useCallback(
+    async (text: string, images?: { mediaType: string; data: string }[]) => {
+      setState((s) => ({ ...s, inTurn: true }))
+      await window.api.chat.send(taskId, { text, images })
+    },
+    [taskId]
+  )
+
+  const interrupt = useCallback(async () => {
+    await window.api.chat.interrupt(taskId)
+  }, [taskId])
+
+  const respondPermission = useCallback(
+    async (requestId: string, optionId: string) => {
+      await window.api.chat.respondPermission(taskId, requestId, optionId)
+    },
+    [taskId]
+  )
+
+  return { state, turns, loading, send, interrupt, respondPermission, refreshTurns }
+}

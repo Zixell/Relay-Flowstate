@@ -4,9 +4,13 @@ import { net } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, resetRunningTasks, resetRunningTurns, getLockedTaskIds } from './db'
 import { disposeAllSessions } from './session/manager'
+import { closeAllConsoles } from './console/manager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { killAllSessions, initLockedStatuses } from './pty/manager'
 import { loadSettings } from './settings'
+
+// Lets tests and parallel dev instances run against their own database and worktrees.
+if (process.env.RELAY_USER_DATA) app.setPath('userData', process.env.RELAY_USER_DATA)
 
 /** Poll until the Vite dev server is accepting connections, then load it. */
 function waitAndLoadURL(win: BrowserWindow, url: string, retries = 20, delay = 300): void {
@@ -103,6 +107,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   killAllSessions()
   void disposeAllSessions()
+  closeAllConsoles()
 })
 
 app.on('window-all-closed', () => {

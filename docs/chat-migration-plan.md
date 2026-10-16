@@ -39,9 +39,15 @@ Users on a Claude Pro/Max login can still run `claude` there by hand.
 ## Phases
 
 - [x] 0. Spike: Claude Agent SDK from Electron's Node — streaming input, canUseTool, resume (OK, SDK 0.3.301, CLI 2.1.301)
-- [ ] 1. Foundation: adapter contract, DB (turns, messages, tasks.transport), StatusMachine, SessionManager, chat:* IPC, mock adapter
-- [ ] 2. ClaudeAdapter + minimal chat UI (ChatView, Composer, PermissionPrompt), "Chat mode" toggle
-- [ ] 3. Rich tool cards, virtualized history, per-turn git snapshots (diff / revert), summaries from messages
+- [x] 1. Foundation: adapter contract, DB (turns, messages, tasks.transport), StatusMachine, SessionManager, chat:* IPC (mock adapter skipped — the live Claude adapter was ready first)
+- [x] 2. ClaudeAdapter + chat UI (ChatView, Composer, PermissionPrompt, ToolCallCard, PlanPanel), "Chat mode" setting, sidecar Console tab
+- [ ] 3. History & polish
+  - [x] per-turn git snapshots, turn footer with file stats and revert
+  - [x] summaries from the chat transcript
+  - [ ] per-turn diff viewer (turns:diff exists, no UI yet), Timeline built on turns
+  - [ ] virtualized message list, syntax highlighting in code blocks
+  - [ ] persist the agent plan across restarts; show user-attached images in history
+  - [ ] dashboard TaskCard: last assistant message instead of terminal preview, "needs approval" badge
 - [ ] 4. CodexAdapter (`codex app-server`) — codex CLI not installed on dev machine yet
 - [ ] 5. AcpAdapter (Gemini CLI, OpenCode, Goose)
 - [ ] 6. Parity: slash commands, attachments, usage/cost, notifications, fork-from-turn, sidecar console (plain shell, no logic)

@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { realpathSync } from 'fs'
 import type {
   AgentEvent,
   AgentSession,
@@ -73,9 +74,27 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
+/** Shows paths inside the task's worktree relative to it. */
+function relativizer(cwd: string): (p: string) => string {
+  const roots = new Set([cwd])
+  try {
+    roots.add(realpathSync(cwd))
+  } catch {
+    // cwd may not exist yet
+  }
+  return (p) => {
+    for (const root of roots) {
+      if (p === root) return '.'
+      if (p.startsWith(root + '/')) return p.slice(root.length + 1)
+    }
+    return p
+  }
+}
+
 /** One-line description of a tool call, shown as the card title. */
-function toolTitle(name: string, input: Record<string, unknown>): string {
-  const path = str(input.file_path) ?? str(input.notebook_path) ?? str(input.path)
+function toolTitle(name: string, input: Record<string, unknown>, rel: (p: string) => string = (p) => p): string {
+  const rawPath = str(input.file_path) ?? str(input.notebook_path) ?? str(input.path)
+  const path = rawPath && rel(rawPath)
   switch (toolKind(name)) {
     case 'read':
     case 'edit':
@@ -178,7 +197,11 @@ class ClaudeSession implements AgentSession {
   private blockCounts = new Map<string, number>()
   private disposed = false
 
-  constructor(private ctx: SessionContext) {}
+  private rel: (p: string) => string
+
+  constructor(private ctx: SessionContext) {
+    this.rel = relativizer(ctx.cwd)
+  }
 
   onEvent(cb: (e: AgentEvent) => void): () => void {
     return this.hub.on(cb)
@@ -274,7 +297,7 @@ class ClaudeSession implements AgentSession {
               toolCallId: block.id,
               kind: toolKind(block.name),
               name: block.name,
-              title: toolTitle(block.name, input),
+              title: toolTitle(block.name, input, this.rel),
               input
             })
             if (block.name === 'TodoWrite') this.emit({ type: 'plan.updated', items: todoPlan(input) })
@@ -362,8 +385,8 @@ class ClaudeSession implements AgentSession {
         type: 'permission.requested',
         requestId,
         toolCallId: opts.toolUseID,
-        title: `${toolName}: ${toolTitle(toolName, input)}`,
-        detail: opts.blockedPath ?? opts.decisionReason,
+        title: `${toolName}: ${toolTitle(toolName, input, this.rel)}`,
+        detail: opts.blockedPath ? this.rel(opts.blockedPath) : opts.decisionReason,
         options
       })
     })

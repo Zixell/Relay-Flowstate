@@ -25,7 +25,18 @@ export interface AgentDescriptor {
   available: boolean
   supportsResume: boolean
   supportsSummaries: boolean
+  /** Present when the agent can run in chat mode. */
+  chat?: ChatCapabilities
   settings: AgentSettingDef[]
+}
+
+export interface ChatCapabilities {
+  resume: boolean
+  interrupt: boolean
+  permissions: boolean
+  images: boolean
+  models?: { id: string; label: string }[]
+  modes?: { id: string; label: string }[]
 }
 
 export interface Project {
@@ -59,6 +70,10 @@ export interface Task {
   metadata?: string
   /** The agent's own session handle, used to resume the conversation. */
   agent_session_id?: string
+  /** 'chat' = structured agent session, 'pty' = legacy terminal task. */
+  transport?: 'pty' | 'chat'
+  model?: string | null
+  mode?: string | null
 }
 
 export interface TaskEvent {
@@ -156,3 +171,89 @@ export const STATUS_CONFIG: Record<
   }
 }
 
+
+// --- Chat mode ---------------------------------------------------------------
+// Mirrors src/main/agents/adapter.ts and the messages table in src/main/db.
+
+export type ToolKind = 'read' | 'edit' | 'write' | 'bash' | 'search' | 'fetch' | 'todo' | 'task' | 'mcp' | 'other'
+
+export interface FileDiff {
+  path: string
+  patch?: string
+  oldText?: string
+  newText?: string
+}
+
+export interface PermissionOption {
+  id: string
+  label: string
+  kind: 'allow_once' | 'allow_always' | 'deny'
+}
+
+export interface PlanItem {
+  text: string
+  status: 'pending' | 'in_progress' | 'done'
+}
+
+export interface ChatMessage {
+  id: string
+  task_id: string
+  turn_id: string | null
+  seq: number
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  kind: 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error'
+  content: string | null
+  tool_call_id: string | null
+  tool_status: string | null
+  created_at: number
+  updated_at: number
+}
+
+export interface ToolCallContent {
+  kind: ToolKind
+  name: string
+  title: string
+  input: Record<string, unknown>
+  output?: string
+  diff?: FileDiff[]
+}
+
+export interface PermissionContent {
+  title: string
+  detail?: string
+  options: PermissionOption[]
+}
+
+export type AgentEvent =
+  | { type: 'session.started'; sessionId: string; model?: string; mode?: string; slashCommands?: string[] }
+  | { type: 'turn.started'; turnId: string }
+  | { type: 'message.delta'; messageId: string; text: string }
+  | { type: 'message.completed'; messageId: string; text: string }
+  | { type: 'thinking'; messageId: string; text: string }
+  | { type: 'tool.started'; toolCallId: string; kind: ToolKind; name: string; title: string; input: unknown }
+  | { type: 'tool.completed'; toolCallId: string; status: 'ok' | 'error'; output?: string; diff?: FileDiff[] }
+  | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
+  | { type: 'permission.resolved'; requestId: string; optionId: string }
+  | { type: 'plan.updated'; items: PlanItem[] }
+  | { type: 'turn.completed'; turnId: string; reason: string; usage?: { costUsd?: number; durationMs?: number; inputTokens?: number; outputTokens?: number } }
+  | { type: 'error'; message: string; fatal: boolean }
+  | { type: 'session.exited'; code: number | null }
+  | { type: 'raw'; payload: unknown }
+
+export interface ChatEventPayload {
+  event: AgentEvent
+  message?: ChatMessage
+}
+
+export interface TurnInfo {
+  id: string
+  task_id: string
+  seq: number
+  status: 'running' | 'completed' | 'interrupted' | 'failed'
+  commit_before: string | null
+  commit_after: string | null
+  usage_json: string | null
+  started_at: number
+  completed_at: number | null
+  files: { path: string; oldPath?: string; status: 'added' | 'modified' | 'deleted' | 'renamed'; additions: number; deletions: number }[]
+}

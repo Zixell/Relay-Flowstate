@@ -22,6 +22,8 @@ import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../type
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Terminal } from './Terminal'
+import { SidecarConsole } from './SidecarConsole'
+import { ChatView } from '../chat/ChatView'
 import { TaskTimeline } from './TaskTimeline'
 import { FileChanges } from './FileChanges'
 import { useAppStore } from '../../stores/appStore'
@@ -32,10 +34,11 @@ interface TaskDetailProps {
   task: Task
 }
 
-type DetailTab = 'terminal' | 'timeline' | 'files' | 'notes' | 'summary'
+type DetailTab = 'chat' | 'console' | 'terminal' | 'timeline' | 'files' | 'notes' | 'summary'
 
 export function TaskDetail({ task }: TaskDetailProps) {
-  const [activeTab, setActiveTab] = useState<DetailTab>('terminal')
+  const isChat = task.transport === 'chat'
+  const [activeTab, setActiveTab] = useState<DetailTab>(isChat ? 'chat' : 'terminal')
   const [notes, setNotes] = useState(task.notes ?? '')
   const [notesSaved, setNotesSaved] = useState(false)
   const [summaries, setSummaries] = useState<SessionSummaryEntry[]>([])
@@ -45,6 +48,11 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const selectTask = useAppStore((s) => s.selectTask)
   const updateTask = useAppStore((s) => s.updateTask)
   const agents = useAppStore((s) => s.agents)
+
+  // A different task may use a different transport.
+  useEffect(() => {
+    setActiveTab(isChat ? 'chat' : 'terminal')
+  }, [task.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync notes when task changes
   useEffect(() => {
@@ -111,10 +119,15 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const handleStop = useCallback(async () => {
     if (!isElectron) return
     setIsStopping(true)
-    await window.api.pty.kill(task.id)
-    updateTask(task.id, { status: 'paused', updated_at: Math.floor(Date.now() / 1000) })
+    if (isChat) {
+      // The status follows from the agent's turn.completed (interrupted) event.
+      await window.api.chat.interrupt(task.id)
+    } else {
+      await window.api.pty.kill(task.id)
+      updateTask(task.id, { status: 'paused', updated_at: Math.floor(Date.now() / 1000) })
+    }
     setIsStopping(false)
-  }, [task.id, updateTask])
+  }, [task.id, isChat, updateTask])
 
   const handleSaveNotes = useCallback(async () => {
     if (isElectron) {
@@ -205,7 +218,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
                   variant="outline"
                   size="sm"
                   className="gap-1.5 h-8 text-xs border-amber-500/20 text-amber-400 hover:bg-amber-500/10"
-                  onClick={() => setActiveTab('terminal')}
+                  onClick={() => setActiveTab(isChat ? 'chat' : 'terminal')}
                 >
                   <MessageSquare className="w-3 h-3" />
                   Respond to Agent
@@ -258,21 +271,26 @@ export function TaskDetail({ task }: TaskDetailProps) {
         </div>
       )}
 
-      {/* Context summary (prompt) */}
-      <div className="px-6 py-3 border-b border-white/[0.05] bg-white/[0.01] shrink-0">
+      {/* Context summary (prompt) — the chat shows it as the first message */}
+      {!isChat && <div className="px-6 py-3 border-b border-white/[0.05] bg-white/[0.01] shrink-0">
         <div className="flex items-start gap-2">
           <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mt-0.5 w-12 shrink-0">
             Prompt
           </div>
           <p className="text-xs text-zinc-400 leading-relaxed line-clamp-2">{task.prompt}</p>
         </div>
-      </div>
+      </div>}
 
       {/* Tabs */}
       <div className="flex items-center gap-0 px-6 border-b border-white/[0.06] bg-[#0d0d0d] shrink-0">
         {(
           [
-            { id: 'terminal', label: 'Terminal' },
+            ...(isChat
+              ? [
+                  { id: 'chat', label: 'Chat' },
+                  { id: 'console', label: 'Console' }
+                ]
+              : [{ id: 'terminal', label: 'Terminal' }]),
             { id: 'timeline', label: 'Timeline' },
             { id: 'files', label: `Files (${task.changed_files_count})` },
             { id: 'notes', label: 'Notes' },
@@ -296,6 +314,14 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
+        {activeTab === 'chat' && <ChatView task={task} onShowFiles={() => setActiveTab('files')} />}
+
+        {activeTab === 'console' && (
+          <div className="h-full p-5">
+            <SidecarConsole task={task} />
+          </div>
+        )}
+
         {activeTab === 'terminal' && (
           <div className="h-full p-5">
             <Terminal task={task} className="h-full" />

@@ -22,6 +22,7 @@ import {
 } from '../db'
 import { snapshotWorkingTree, diffSnapshotFiles } from '../git/snapshots'
 import { generateSessionSummary } from '../summary/generator'
+import { getGitChanges } from '../git'
 import { initialStatusState, reduceStatus, type StatusState, type TaskStatus } from './status'
 
 interface TaskRow {
@@ -247,6 +248,17 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
     content: changed.length ? `${changed.length} file(s) changed` : 'No file changes',
     metadata: JSON.stringify({ turnId: e.turnId, reason: e.reason, files: changed.map((f) => f.path) })
   })
+
+  // Same scope as the Files tab: everything since the task started.
+  try {
+    const task = loadTask(taskId)
+    const meta = task.metadata ? JSON.parse(task.metadata) : {}
+    const count = getGitChanges(s.cwd, undefined, meta.startCommit).files.length
+    updateTaskStatus(taskId, s.status.status, { changed_files_count: count })
+    send('task:status', { taskId, status: s.status.status, changedFilesCount: count })
+  } catch (err) {
+    console.warn('[relay] could not count changed files:', err)
+  }
 
   if (e.reason === 'end_turn' || e.reason === 'max_tokens') void summarize(taskId, e.turnId)
 }
