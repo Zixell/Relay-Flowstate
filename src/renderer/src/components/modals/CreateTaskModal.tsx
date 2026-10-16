@@ -140,6 +140,7 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
         notes: ''
       }
 
+      let task = newTask
       if (isElectron) {
         const created = await window.api.tasks.create({
           projectId: resolvedId,
@@ -149,10 +150,12 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
           branch: branch || undefined,
           cwd: resolvedPath
         })
-        newTask.id = created.id
+        // The stored row carries what main decided: chat vs terminal, worktree, metadata.
+        const stored = (await window.api.tasks.getById(created.id)) as Task | null
+        task = stored ?? { ...newTask, id: created.id, transport: created.transport }
       }
 
-      addTask(newTask)
+      addTask(task)
       onClose()
       resetForm()
     } catch (err: unknown) {

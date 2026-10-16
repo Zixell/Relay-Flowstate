@@ -50,10 +50,10 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const updateTask = useAppStore((s) => s.updateTask)
   const agents = useAppStore((s) => s.agents)
 
-  // A different task may use a different transport.
+  // A different task may use a different transport; reset the tab when it changes.
   useEffect(() => {
     setActiveTab(isChat ? 'chat' : 'terminal')
-  }, [task.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [task.id, isChat])
 
   // Sync notes when task changes
   useEffect(() => {
