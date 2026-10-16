@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
+  /** Host OS — macOS draws native window controls, other platforms use ours. */
+  platform: process.platform,
+
   // Window controls
   window: {
     minimize: () => ipcRenderer.send('window:minimize'),
@@ -106,6 +109,9 @@ const api = {
     history: (taskId: string, opts?: { beforeSeq?: number; limit?: number }) =>
       ipcRenderer.invoke('chat:history', { taskId, ...opts }),
     live: (taskId: string) => ipcRenderer.invoke('chat:live', taskId),
+    /** Data URL of an image attached to a user message, or null if it is gone. */
+    attachment: (taskId: string, id: string): Promise<string | null> =>
+      ipcRenderer.invoke('chat:attachment', { taskId, id }),
     onEvent: (taskId: string, callback: (payload: unknown) => void) => {
       const listener = (_: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
       ipcRenderer.on(`chat:event:${taskId}`, listener)

@@ -108,6 +108,7 @@ function createSchema(db: Database.Database): void {
   try { db.exec("ALTER TABLE tasks ADD COLUMN transport TEXT NOT NULL DEFAULT 'pty'") } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN model TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT') } catch { /* already exists */ }
+  try { db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT') } catch { /* already exists or table not created yet */ }
   db.exec(`
     CREATE TABLE IF NOT EXISTS turns (
       id TEXT PRIMARY KEY,
@@ -133,7 +134,8 @@ function createSchema(db: Database.Database): void {
       tool_call_id TEXT,
       tool_status TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      attachments TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, seq);
     CREATE INDEX IF NOT EXISTS idx_messages_tool ON messages(task_id, tool_call_id);
@@ -430,8 +432,15 @@ export interface MessageRow {
   content: string | null
   tool_call_id: string | null
   tool_status: string | null
+  /** JSON array of `MessageAttachment`. */
+  attachments: string | null
   created_at: number
   updated_at: number
+}
+
+export interface MessageAttachment {
+  id: string
+  mediaType: string
 }
 
 export function insertMessage(msg: {
@@ -443,16 +452,18 @@ export function insertMessage(msg: {
   content?: string | null
   tool_call_id?: string | null
   tool_status?: string | null
+  attachments?: MessageAttachment[]
 }): MessageRow | undefined {
   if (!db) return undefined
   const seq = (db.prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM messages WHERE task_id = ?').get(msg.task_id) as { n: number }).n
   const now = Date.now()
   db.prepare(
-    `INSERT INTO messages (id, task_id, turn_id, seq, role, kind, content, tool_call_id, tool_status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO messages (id, task_id, turn_id, seq, role, kind, content, tool_call_id, tool_status, attachments, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     msg.id, msg.task_id, msg.turn_id ?? null, seq, msg.role, msg.kind,
-    msg.content ?? null, msg.tool_call_id ?? null, msg.tool_status ?? null, now, now
+    msg.content ?? null, msg.tool_call_id ?? null, msg.tool_status ?? null,
+    msg.attachments?.length ? JSON.stringify(msg.attachments) : null, now, now
   )
   return db.prepare('SELECT * FROM messages WHERE id = ?').get(msg.id) as MessageRow
 }

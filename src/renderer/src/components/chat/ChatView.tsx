@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Brain, ChevronRight, AlertTriangle, Loader2, FileCode, Undo2, CircleDot, CheckCircle2, Circle } from 'lucide-react'
+import { Brain, ChevronRight, AlertTriangle, ImageOff, Loader2, FileCode, Undo2, CircleDot, CheckCircle2, Circle } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
 import { useAppStore } from '../../stores/appStore'
@@ -23,12 +23,79 @@ function Thinking({ text }: { text: string }) {
   )
 }
 
-function UserBubble({ text }: { text: string }) {
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-white/[0.07] border border-white/[0.06] px-4 py-2.5 text-[13px] text-zinc-100 whitespace-pre-wrap break-words leading-relaxed">
-        {text}
+/** Loaded attachment images, shared across re-renders and task switches. */
+const attachmentCache = new Map<string, Promise<string | null>>()
+
+function AttachmentThumb({ taskId, id, onOpen }: { taskId: string; id: string; onOpen: (src: string) => void }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    let alive = true
+    if (!attachmentCache.has(id)) attachmentCache.set(id, window.api.chat.attachment(taskId, id))
+    attachmentCache.get(id)!.then((url) => {
+      if (!alive) return
+      if (url) setSrc(url)
+      else setMissing(true)
+    })
+    return () => {
+      alive = false
+    }
+  }, [taskId, id])
+
+  if (missing) {
+    return (
+      <div className="h-20 w-20 rounded-xl border border-white/10 bg-white/[0.03] flex items-center justify-center text-zinc-600">
+        <ImageOff className="w-4 h-4" />
       </div>
+    )
+  }
+  return src ? (
+    <button onClick={() => onOpen(src)} className="block rounded-xl overflow-hidden border border-white/10 hover:border-white/25 transition-colors">
+      <img src={src} className="h-20 max-w-[160px] object-cover" />
+    </button>
+  ) : (
+    <div className="h-20 w-20 rounded-xl border border-white/10 bg-white/[0.03] animate-pulse" />
+  )
+}
+
+function UserBubble({ message, onOpenImage }: { message: ChatMessage; onOpenImage: (src: string) => void }) {
+  const attachments = useMemo<{ id: string }[]>(() => {
+    try {
+      return message.attachments ? JSON.parse(message.attachments) : []
+    } catch {
+      return []
+    }
+  }, [message.attachments])
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1.5 max-w-[85%]">
+          {attachments.map((a) => (
+            <AttachmentThumb key={a.id} taskId={message.task_id} id={a.id} onOpen={onOpenImage} />
+          ))}
+        </div>
+      )}
+      {message.content && (
+        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-white/[0.07] border border-white/[0.06] px-4 py-2.5 text-[13px] text-zinc-100 whitespace-pre-wrap break-words leading-relaxed">
+          {message.content}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-10 cursor-zoom-out">
+      <img src={src} className="max-w-full max-h-full rounded-lg shadow-2xl" />
     </div>
   )
 }
@@ -113,6 +180,7 @@ export function ChatView({ task, onShowFiles }: Props) {
   const capabilities = agents.find((a) => a.id === task.process_type)?.chat
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  const [viewerSrc, setViewerSrc] = useState<string | null>(null)
 
   const turnById = useMemo(() => new Map(turns.map((t) => [t.id, t])), [turns])
 
@@ -173,7 +241,7 @@ export function ChatView({ task, onShowFiles }: Props) {
   const renderMessage = (m: ChatMessage): React.ReactNode => {
     switch (m.kind) {
       case 'text':
-        return m.role === 'user' ? <UserBubble text={m.content ?? ''} /> : <Markdown text={m.content ?? ''} />
+        return m.role === 'user' ? <UserBubble message={m} onOpenImage={setViewerSrc} /> : <Markdown text={m.content ?? ''} />
       case 'thinking':
         return <Thinking text={m.content ?? ''} />
       case 'tool_call':
@@ -203,6 +271,7 @@ export function ChatView({ task, onShowFiles }: Props) {
 
   return (
     <div className="flex flex-col h-full">
+      {viewerSrc && <ImageViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-6">
           {loading && (

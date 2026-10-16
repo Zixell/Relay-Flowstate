@@ -180,8 +180,8 @@ export function TopBar() {
 
   return (
     <header className="flex items-center h-12 px-4 border-b border-white/[0.06] bg-[#0d0d0d] shrink-0 gap-3">
-      {/* Window traffic lights placeholder on non-mac or custom frame */}
-      {isElectron && (
+      {/* Custom window controls — macOS shows its native traffic lights instead */}
+      {isElectron && window.api.platform !== 'darwin' && (
         <div className="flex items-center gap-1.5 mr-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button
             onClick={() => window.api.window.close()}

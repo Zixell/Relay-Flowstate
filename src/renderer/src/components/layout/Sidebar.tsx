@@ -79,7 +79,11 @@ export function Sidebar({ className }: SidebarProps) {
     >
       {/* App header / title bar drag area */}
       <div
-        className="flex items-center gap-2.5 px-4 pt-5 pb-4 app-drag-region"
+        className={cn(
+          'flex items-center gap-2.5 px-4 pb-4 app-drag-region',
+          // Leave room for the native traffic lights (trafficLightPosition in main/index.ts)
+          window.api?.platform === 'darwin' ? 'pt-12' : 'pt-5'
+        )}
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">

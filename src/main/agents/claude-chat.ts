@@ -418,7 +418,7 @@ class ClaudeSession implements AgentSession {
     for (const img of input.images ?? []) {
       content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } })
     }
-    content.push({ type: 'text', text: input.text })
+    if (input.text.trim()) content.push({ type: 'text', text: input.text })
     this.input.push({
       type: 'user',
       message: { role: 'user', content: content as never },

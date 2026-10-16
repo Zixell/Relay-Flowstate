@@ -62,6 +62,7 @@ import {
   disposeSession
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
+import { readAttachment, deleteAttachments } from '../session/attachments'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
 /** Setting that routes chat-capable agents to chat mode instead of a terminal. */
@@ -255,6 +256,7 @@ export function registerIpcHandlers(): void {
     killPtySession(id)
     closeConsole(id)
     await disposeSession(id)
+    deleteAttachments(id)
     deleteTask(id)
     return { success: true }
   })
@@ -367,6 +369,7 @@ export function registerIpcHandlers(): void {
       getMessages(taskId, { beforeSeq, limit })
   )
   ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
+  ipcMain.handle('chat:attachment', (_, { taskId, id }: { taskId: string; id: string }) => readAttachment(taskId, id))
 
   // --- Sidecar console (plain shell in the task's worktree, no agent logic) ---
   ipcMain.handle('console:open', (_, { taskId, cols, rows }: { taskId: string; cols: number; rows: number }) => {

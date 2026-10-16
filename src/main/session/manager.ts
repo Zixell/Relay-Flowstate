@@ -23,6 +23,7 @@ import {
 import { snapshotWorkingTree, diffSnapshotFiles } from '../git/snapshots'
 import { generateSessionSummary } from '../summary/generator'
 import { getGitChanges } from '../git'
+import { saveAttachment } from './attachments'
 import { initialStatusState, reduceStatus, type StatusState, type TaskStatus } from './status'
 
 interface TaskRow {
@@ -309,7 +310,16 @@ async function summarize(taskId: string, turnId: string): Promise<void> {
 
 export async function sendMessage(taskId: string, input: UserInput): Promise<MessageRow | undefined> {
   const s = await ensureSession(taskId)
-  const message = insertMessage({ id: randomUUID(), task_id: taskId, turn_id: s.turnId, role: 'user', kind: 'text', content: input.text })
+  const attachments = (input.images ?? []).map((img) => saveAttachment(taskId, img))
+  const message = insertMessage({
+    id: randomUUID(),
+    task_id: taskId,
+    turn_id: s.turnId,
+    role: 'user',
+    kind: 'text',
+    content: input.text,
+    attachments
+  })
   if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { userMessage: true } }, message })
   await s.session.send(input)
   return message

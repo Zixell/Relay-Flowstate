@@ -205,6 +205,8 @@ export interface ChatMessage {
   content: string | null
   tool_call_id: string | null
   tool_status: string | null
+  /** JSON array of `{ id, mediaType }` — images attached to a user message. */
+  attachments?: string | null
   created_at: number
   updated_at: number
 }
