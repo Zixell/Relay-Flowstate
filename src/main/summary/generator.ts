@@ -1,4 +1,5 @@
-import { execSync, spawnSync, spawn } from 'child_process'
+import { execSync, spawn } from 'child_process'
+import { isAgentAvailable, resolveSummaryAgent, type AgentDefinition } from '../agents'
 
 export interface SessionSummary {
   session_id: string
@@ -43,38 +44,35 @@ function getRecentCommits(cwd: string, startCommit?: string): string[] {
   }
 }
 
-// ── Claude CLI ─────────────────────────────────────────────────────────────────
+// ── Headless agent CLI ─────────────────────────────────────────────────────────
 
 const ANSI_STRIP = /\x1b\[[0-9;]*[a-zA-Z]/g
 
-/** Returns true if the `claude` CLI is available on PATH */
+/** Returns true if the Claude Code CLI is available on PATH. */
 export function isClaudeCliAvailable(): boolean {
-  try {
-    const result = spawnSync('claude', ['--version'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true,
-      shell: true
-    })
-    return result.status === 0
-  } catch {
-    return false
-  }
+  return isAgentAvailable('claude-code')
 }
 
-/** Runs `claude --print` asynchronously, passing the prompt via stdin to avoid
- *  Windows command-line length limits and newline-escaping issues — never blocks the event loop */
-function runClaudeCli(prompt: string, cwd: string): Promise<string | null> {
+/**
+ * Runs an agent's headless command asynchronously — never blocks the event loop.
+ *
+ * The prompt is preferably passed via stdin, which sidesteps Windows
+ * command-line length limits (~8191 chars) and newline/quote escaping breakage.
+ */
+function runHeadlessAgent(
+  agent: AgentDefinition,
+  prompt: string,
+  cwd: string
+): Promise<string | null> {
+  const headless = agent.headless
+  if (!headless) return Promise.resolve(null)
+
   return new Promise((resolve) => {
+    const args = headless.promptVia === 'arg' ? [...headless.args, prompt] : headless.args
+
     let child: ReturnType<typeof spawn>
     try {
-      // Pass prompt via stdin, not as a CLI arg — avoids Windows cmd.exe
-      // length limits (~8191 chars) and newline/quote escaping breakage.
-      child = spawn(
-        'claude',
-        ['--print', '--dangerously-skip-permissions'],
-        { cwd, windowsHide: true, shell: true, env: process.env }
-      )
+      child = spawn(headless.cmd, args, { cwd, windowsHide: true, shell: true, env: process.env })
     } catch {
       return resolve(null)
     }
@@ -84,33 +82,39 @@ function runClaudeCli(prompt: string, cwd: string): Promise<string | null> {
     child.stdout?.on('data', (chunk) => { stdout += chunk })
     child.stderr?.on('data', (chunk) => { stderr += chunk })
 
-    // Write prompt to stdin and close the stream so claude knows input is done
-    try {
-      child.stdin?.write(prompt, 'utf8')
-      child.stdin?.end()
-    } catch {
-      try { child.kill() } catch { /* ignore */ }
-      return resolve(null)
+    if (headless.promptVia === 'stdin') {
+      // Close the stream so the CLI knows input is done
+      try {
+        child.stdin?.write(prompt, 'utf8')
+        child.stdin?.end()
+      } catch {
+        try { child.kill() } catch { /* ignore */ }
+        return resolve(null)
+      }
+    } else {
+      try { child.stdin?.end() } catch { /* ignore */ }
     }
 
     const timer = setTimeout(() => {
       try { child.kill() } catch { /* ignore */ }
-      console.warn('[relay] claude CLI timed out after 60s')
+      console.warn(`[relay] ${agent.binary} CLI timed out after 60s`)
       resolve(null)
     }, 60_000)
 
     child.on('close', (code) => {
       clearTimeout(timer)
       if (code !== 0 || !stdout.trim()) {
-        if (stderr) console.warn('[relay] claude CLI stderr:', stderr.slice(0, 200))
+        if (stderr) console.warn(`[relay] ${agent.binary} CLI stderr:`, stderr.slice(0, 200))
         return resolve(null)
       }
-      resolve(stdout.replace(ANSI_STRIP, '').trim())
+      const clean = stdout.replace(ANSI_STRIP, '')
+      const parsed = headless.parseOutput ? headless.parseOutput(clean) : clean
+      resolve(parsed.trim() || null)
     })
 
     child.on('error', (err) => {
       clearTimeout(timer)
-      console.warn('[relay] claude CLI spawn error:', err.message)
+      console.warn(`[relay] ${agent.binary} CLI spawn error:`, err.message)
       resolve(null)
     })
   })
@@ -118,6 +122,20 @@ function runClaudeCli(prompt: string, cwd: string): Promise<string | null> {
 
 
 // ── Public API ─────────────────────────────────────────────────────────────────
+
+export interface GenerateSummaryOptions {
+  taskId: string
+  /** Agent that ran the task — its CLI is preferred for writing the summary. */
+  agentId: string
+  userPrompts: string[]
+  cwd: string
+  startCommit?: string
+  status?: 'completed' | 'waiting'
+  /** ANSI-stripped terminal output produced since the last summary. */
+  agentOutput?: string
+  existingSummaryText?: string
+  lastLogId?: number
+}
 
 /**
  * Generates or updates the single summary for a task.
@@ -127,17 +145,25 @@ function runClaudeCli(prompt: string, cwd: string): Promise<string | null> {
  *   summary with new prompts/output from the latest session only.
  *
  * There is always exactly one summary per task — this replaces any previous one.
+ *
+ * The summary is written by whichever agent CLI is installed (the task's own
+ * agent first), falling back to a git-derived summary when none is available.
  */
 export async function generateSessionSummary(
-  taskId: string,
-  userPrompts: string[],
-  cwd: string,
-  startCommit?: string,
-  status: 'completed' | 'waiting' = 'completed',
-  claudeOutput?: string,
-  existingSummaryText?: string,
-  lastLogId?: number
+  options: GenerateSummaryOptions
 ): Promise<SessionSummary> {
+  const {
+    taskId,
+    agentId,
+    userPrompts,
+    cwd,
+    startCommit,
+    status = 'completed',
+    agentOutput,
+    existingSummaryText,
+    lastLogId
+  } = options
+
   const sessionId = `sess_${taskId.slice(0, 8)}`
   const timestamp = new Date().toISOString()
   const modifiedFiles = getModifiedFiles(cwd, startCommit)
@@ -159,8 +185,9 @@ export async function generateSessionSummary(
     }
   }
 
-  if (!isClaudeCliAvailable()) {
-    console.warn('[relay] claude CLI not found — using git-based fallback summary')
+  const summaryAgent = resolveSummaryAgent(agentId)
+  if (!summaryAgent) {
+    console.warn('[relay] no agent CLI found — using git-based fallback summary')
     return fallback()
   }
 
@@ -172,8 +199,8 @@ export async function generateSessionSummary(
     ? `Commits: ${commits.join(', ')}`
     : ''
 
-  const outputSection = claudeOutput && claudeOutput.trim()
-    ? `Agent terminal output (latest session):\n${claudeOutput.slice(-5000)}`
+  const outputSection = agentOutput && agentOutput.trim()
+    ? `Agent terminal output (latest session):\n${agentOutput.slice(-5000)}`
     : ''
 
   let prompt: string
@@ -216,11 +243,11 @@ export async function generateSessionSummary(
       `Added migration 004_users.sql and 12 new tests in auth.test.ts."`
   }
 
-  console.log('[relay] Generating task summary via claude CLI...')
-  const output = await runClaudeCli(prompt, cwd)
+  console.log(`[relay] Generating task summary via ${summaryAgent.binary} CLI...`)
+  const output = await runHeadlessAgent(summaryAgent, prompt, cwd)
 
   if (!output) {
-    console.warn('[relay] claude CLI returned no output — using fallback')
+    console.warn(`[relay] ${summaryAgent.binary} CLI returned no output — using fallback`)
     return fallback()
   }
 
@@ -232,7 +259,7 @@ export async function generateSessionSummary(
     .trim()
 
   if (!text) {
-    console.warn('[relay] claude CLI returned empty text — using fallback')
+    console.warn(`[relay] ${summaryAgent.binary} CLI returned empty text — using fallback`)
     return fallback()
   }
 

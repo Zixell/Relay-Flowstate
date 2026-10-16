@@ -1,6 +1,32 @@
 export type TaskStatus = 'running' | 'waiting' | 'completed' | 'failed' | 'paused' | 'pending'
 
-export type ProcessType = 'claude-code' | 'aider' | 'opencode' | 'generic'
+/**
+ * Agent identifier, matching an `AgentDefinition.id` in `src/main/agents`.
+ * Typed loosely on purpose: the authoritative catalog is served at runtime by
+ * `window.api.agents.list()`, so adding an agent in main needs no change here.
+ */
+export type ProcessType = 'claude-code' | 'codex' | 'aider' | 'opencode' | 'generic' | (string & {})
+
+/** Serializable agent description, mirrors `AgentDescriptor` in the main process. */
+export interface AgentSettingDef {
+  key: string
+  label: string
+  description: string
+  type: 'boolean'
+  default: boolean
+}
+
+export interface AgentDescriptor {
+  id: ProcessType
+  label: string
+  description: string
+  color: string
+  enabled: boolean
+  available: boolean
+  supportsResume: boolean
+  supportsSummaries: boolean
+  settings: AgentSettingDef[]
+}
 
 export interface Project {
   id: string
@@ -31,7 +57,8 @@ export interface Task {
   notes?: string
   summary?: string
   metadata?: string
-  claude_session_id?: string
+  /** The agent's own session handle, used to resume the conversation. */
+  agent_session_id?: string
 }
 
 export interface TaskEvent {
@@ -57,18 +84,34 @@ export interface FileChange {
   deletions?: number
 }
 
-export const PROCESS_LABELS: Record<ProcessType, string> = {
+/**
+ * Static fallbacks used before the agent catalog is fetched (and in browser /
+ * mock mode). The catalog from `window.api.agents.list()` always wins.
+ */
+export const PROCESS_LABELS: Record<string, string> = {
   'claude-code': 'Claude Code',
+  codex: 'Codex',
   aider: 'Aider',
   opencode: 'OpenCode',
   generic: 'CLI Tool'
 }
 
-export const PROCESS_COLORS: Record<ProcessType, string> = {
+export const PROCESS_COLORS: Record<string, string> = {
   'claude-code': '#f97316',
+  codex: '#10b981',
   aider: '#8b5cf6',
   opencode: '#06b6d4',
   generic: '#6b7280'
+}
+
+/** Label for an agent id — falls back to the raw id for unknown agents. */
+export function processLabel(id: ProcessType, agents: AgentDescriptor[] = []): string {
+  return agents.find((a) => a.id === id)?.label ?? PROCESS_LABELS[id] ?? id
+}
+
+/** Accent color for an agent id — falls back to a neutral gray. */
+export function processColor(id: ProcessType, agents: AgentDescriptor[] = []): string {
+  return agents.find((a) => a.id === id)?.color ?? PROCESS_COLORS[id] ?? '#6b7280'
 }
 
 export const STATUS_CONFIG: Record<

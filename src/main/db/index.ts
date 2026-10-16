@@ -49,7 +49,8 @@ function createSchema(): void {
       notes TEXT,
       summary TEXT,
       metadata TEXT DEFAULT '{}',
-      claude_session_id TEXT
+      claude_session_id TEXT,
+      agent_session_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS task_events (
@@ -85,6 +86,13 @@ function createSchema(): void {
   try { db.exec('ALTER TABLE tasks ADD COLUMN summary TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN worktree_path TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN claude_session_id TEXT') } catch { /* already exists */ }
+  // agent_session_id replaces the Claude-specific column — it stores the resume
+  // handle of whichever agent ran the task. Existing Claude ids are carried over.
+  try { db.exec('ALTER TABLE tasks ADD COLUMN agent_session_id TEXT') } catch { /* already exists */ }
+  try {
+    db.exec(`UPDATE tasks SET agent_session_id = claude_session_id
+             WHERE agent_session_id IS NULL AND claude_session_id IS NOT NULL`)
+  } catch { /* claude_session_id may not exist on a fresh DB */ }
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS task_summaries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -198,9 +206,10 @@ export function updateTaskStatus(
   )
 }
 
-export function updateTaskClaudeSessionId(id: string, claudeSessionId: string) {
+/** Stores the agent's own session handle so the task can be resumed later. */
+export function updateTaskAgentSessionId(id: string, agentSessionId: string) {
   if (!db) return
-  db.prepare('UPDATE tasks SET claude_session_id = ?, updated_at = unixepoch() WHERE id = ?').run(claudeSessionId, id)
+  db.prepare('UPDATE tasks SET agent_session_id = ?, updated_at = unixepoch() WHERE id = ?').run(agentSessionId, id)
 }
 
 export function updateTaskNotes(id: string, notes: string) {

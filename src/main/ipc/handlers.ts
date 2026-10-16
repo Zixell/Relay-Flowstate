@@ -13,7 +13,7 @@ import {
   insertTaskEvent,
   updateTaskStatus,
   updateTaskNotes,
-  updateTaskClaudeSessionId,
+  updateTaskAgentSessionId,
   appendTaskSummary,
   deleteTask
 } from '../db'
@@ -23,9 +23,17 @@ import {
   resizePty,
   killPtySession,
   getActiveSessions,
-  unlockTaskStatus,
-  watchForNewClaudeSession
+  unlockTaskStatus
 } from '../pty/manager'
+import {
+  getAgent,
+  describeAgents,
+  isAgentAvailable,
+  resolveLaunch,
+  watchForNewSession,
+  type AgentDefinition,
+  type ResumeMode
+} from '../agents'
 import {
   getGitChanges,
   getFileDiff,
@@ -40,11 +48,58 @@ import {
   commitAllAndMerge
 } from '../git'
 import { addWorktree, removeWorktree } from '../git/worktree'
-import { isClaudeCliAvailable } from '../summary/generator'
-import { getSetting, setSetting, getSettingForClient } from '../settings'
+import { setSetting, getSettingForClient } from '../settings'
 
 // Per-task input buffer to reconstruct full lines from character-by-character PTY writes
 const inputBuffers = new Map<string, string>()
+
+/**
+ * Launches — or resumes — a task's agent session.
+ *
+ * All agent-specific knowledge (flags, resume syntax, how the prompt is
+ * delivered, where session ids come from) lives in the agent definition, so
+ * this function is identical for every agent.
+ */
+function startAgentSession(params: {
+  taskId: string
+  agent: AgentDefinition
+  cwd: string
+  prompt?: string
+  resumeSessionId?: string
+  /** True when restarting an existing task (see `BuildLaunchOptions.allowContinue`). */
+  allowContinue?: boolean
+  cols: number
+  rows: number
+}): { resumed: boolean; resumeMode: ResumeMode } {
+  const { taskId, agent, cwd, prompt, resumeSessionId, allowContinue, cols, rows } = params
+  const launch = resolveLaunch(agent, { cwd, prompt, resumeSessionId, allowContinue })
+
+  // Snapshot the agent's session directory BEFORE launch, then capture the id of
+  // the session file it creates — that's the handle used to resume later.
+  // Resuming by id keeps the original id, so this only runs when we don't have one.
+  if (launch.resumeMode !== 'session-id' && agent.sessionDiscovery && agent.buildResumeCommand) {
+    watchForNewSession(agent.sessionDiscovery, (sessionId) => {
+      updateTaskAgentSessionId(taskId, sessionId)
+    })
+  }
+
+  console.log(
+    `[relay] ${agent.label} session for task ${taskId.slice(0, 8)}: ` +
+      `${launch.resumeMode} — ${launch.command.cmd} ${launch.command.args.join(' ')}`
+  )
+
+  createPtySession({
+    taskId,
+    agentId: agent.id,
+    command: launch.command,
+    cwd,
+    typedPrompt: launch.typedPrompt,
+    cols,
+    rows
+  })
+
+  return { resumed: launch.resumed, resumeMode: launch.resumeMode }
+}
 
 function emitTaskEvent(event: { id: string; task_id: string; type: string; content: string; metadata: string | null; timestamp?: number }): void {
   const win = BrowserWindow.getAllWindows()[0]
@@ -134,30 +189,14 @@ export function registerIpcHandlers(): void {
         })
       }
 
-      // Build command from process type.
-      const agentShell = process.platform === 'win32' ? 'cmd.exe' : 'bash'
-      const skipPerms = getSetting('CLAUDE_SKIP_PERMISSIONS') !== 'false'
-      const claudeArgs = skipPerms ? ['--dangerously-skip-permissions'] : []
-      const commands: Record<string, { cmd: string; args: string[] }> = {
-        'claude-code': { cmd: 'claude', args: claudeArgs },
-        aider: { cmd: 'aider', args: ['--yes'] },
-        opencode: { cmd: 'opencode', args: [] },
-        generic: { cmd: agentShell, args: [] }
-      }
-
-      const { cmd, args } = commands[processType] ?? commands.generic
-      // All agent processes receive the prompt as keyboard input after startup
-      const sendPrompt = processType !== 'generic'
-
-      // For claude-code: snapshot existing session files BEFORE launch, then
-      // watch for the new one Claude creates — its UUID filename is the session ID.
-      if (processType === 'claude-code') {
-        watchForNewClaudeSession((sessionId) => {
-          updateTaskClaudeSessionId(id, sessionId)
-        })
-      }
-
-      createPtySession(id, cmd, args, effectiveCwd, undefined, sendPrompt ? prompt : undefined, cols, rows)
+      startAgentSession({
+        taskId: id,
+        agent: getAgent(processType),
+        cwd: effectiveCwd,
+        prompt,
+        cols,
+        rows
+      })
 
       return { id, projectId, title, prompt, processType, branch, status: 'running' }
     }
@@ -242,40 +281,29 @@ export function registerIpcHandlers(): void {
       worktree_path?: string
       branch?: string
       summary?: string
-      claude_session_id?: string
+      agent_session_id?: string
     } | null
     if (!task) throw new Error('Task not found')
 
     killPtySession(taskId)
 
-    const skipPermsRestart = getSetting('CLAUDE_SKIP_PERMISSIONS') !== 'false'
-    const claudeBaseArgs = skipPermsRestart ? ['--dangerously-skip-permissions'] : []
-
-    let cmd: string
-    let args: string[]
-
-    // For claude-code with a saved session ID, resume the existing session
-    if (task.process_type === 'claude-code' && task.claude_session_id) {
-      cmd = 'claude'
-      args = ['--resume', task.claude_session_id, ...claudeBaseArgs]
-    } else {
-      const commands: Record<string, { cmd: string; args: string[] }> = {
-        'claude-code': { cmd: 'claude', args: claudeBaseArgs },
-        aider: { cmd: 'aider', args: ['--yes'] },
-        opencode: { cmd: 'opencode', args: [] },
-        generic: { cmd: process.platform === 'win32' ? 'cmd.exe' : 'bash', args: [] }
-      }
-      const resolved = commands[task.process_type] ?? commands.generic
-      cmd = resolved.cmd
-      args = resolved.args
-    }
-
     // Use the task's worktree if it exists, otherwise fall back to the project root
     const sessionCwd = task.worktree_path || task.project_path
-    createPtySession(taskId, cmd, args, sessionCwd, undefined, undefined, cols, rows)
+
+    // A captured session id resumes that exact conversation; without one the
+    // agent may still continue the newest conversation in this working tree.
+    const { resumed, resumeMode } = startAgentSession({
+      taskId,
+      agent: getAgent(task.process_type),
+      cwd: sessionCwd,
+      resumeSessionId: task.agent_session_id || undefined,
+      allowContinue: true,
+      cols,
+      rows
+    })
 
     updateTaskStatus(taskId, 'running')
-    return { success: true }
+    return { success: true, resumed, resumeMode }
   })
 
   // --- Worktree ---
@@ -294,13 +322,17 @@ export function registerIpcHandlers(): void {
     return removeWorktree(task.project_path, task.worktree_path, force ?? false)
   })
 
+  // --- Agents ---
+  ipcMain.handle('agents:list', () => describeAgents())
+
   // --- Settings ---
   ipcMain.handle('settings:get', (_, key: string) => {
-    if (key === 'CLAUDE_CLI_AVAILABLE') return String(isClaudeCliAvailable())
+    // Legacy key kept so older renderer builds keep working
+    if (key === 'CLAUDE_CLI_AVAILABLE') return String(isAgentAvailable('claude-code'))
     return getSettingForClient(key)
   })
   ipcMain.handle('settings:getAll', () => {
-    return { CLAUDE_CLI_AVAILABLE: String(isClaudeCliAvailable()) }
+    return { CLAUDE_CLI_AVAILABLE: String(isAgentAvailable('claude-code')) }
   })
   ipcMain.handle('settings:set', (_, { key, value }: { key: string; value: string }) => {
     setSetting(key, value)

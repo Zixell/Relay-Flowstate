@@ -54,6 +54,11 @@ const api = {
     delete: (id: string) => ipcRenderer.invoke('tasks:delete', id)
   },
 
+  // Agents (catalog + per-agent capabilities and settings schema)
+  agents: {
+    list: () => ipcRenderer.invoke('agents:list')
+  },
+
   // Settings
   settings: {
     get: (key: string) => ipcRenderer.invoke('settings:get', key),

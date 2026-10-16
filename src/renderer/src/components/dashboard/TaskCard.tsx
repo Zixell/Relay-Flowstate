@@ -14,7 +14,7 @@ import {
   Trash2
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
-import { STATUS_CONFIG, PROCESS_LABELS, PROCESS_COLORS, type Task } from '../../types'
+import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { MOCK_TERMINAL_LOGS } from '../../lib/mockData'
@@ -32,7 +32,8 @@ export function TaskCard({ task }: TaskCardProps) {
   const deleteTask = useAppStore((s) => s.deleteTask)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const statusCfg = STATUS_CONFIG[task.status]
-  const processColor = PROCESS_COLORS[task.process_type]
+  const agents = useAppStore((s) => s.agents)
+  const agentColor = processColor(task.process_type, agents)
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -105,12 +106,12 @@ export function TaskCard({ task }: TaskCardProps) {
               </div>
 
               {/* Process type */}
-              <div className="flex items-center gap-1 text-[11px]" style={{ color: processColor }}>
+              <div className="flex items-center gap-1 text-[11px]" style={{ color: agentColor }}>
                 <span
                   className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: processColor }}
+                  style={{ backgroundColor: agentColor }}
                 />
-                <span>{PROCESS_LABELS[task.process_type]}</span>
+                <span>{processLabel(task.process_type, agents)}</span>
               </div>
 
               {/* Branch */}

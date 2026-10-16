@@ -1,9 +1,7 @@
 import { BrowserWindow } from 'electron'
 import { insertTerminalLog, updateTaskStatus, getTaskById, appendTaskSummary, getTaskSummaries, getTaskEvents, getTerminalLogs } from '../db'
 import { generateSessionSummary } from '../summary/generator'
-import { homedir } from 'os'
-import { join } from 'path'
-import { readdirSync, existsSync } from 'fs'
+import { getAgent, sanitizeArgForShell, type AgentDefinition } from '../agents'
 
 // Lazy-load node-pty so a missing native binding doesn't crash the whole app
 let pty: typeof import('node-pty') | null = null
@@ -65,6 +63,7 @@ function scheduleInactivityCheck(taskId: string): void {
         project_path: string
         worktree_path?: string
         metadata?: string
+        process_type: string
       } | null
       if (!task) return
 
@@ -83,7 +82,7 @@ function scheduleInactivityCheck(taskId: string): void {
 
       // Only use logs produced since the previous summary was generated
       const newLogs = lastLogId > 0 ? allLogs.filter((l) => l.id > lastLogId) : allLogs
-      const claudeOutput = newLogs
+      const agentOutput = newLogs
         .map((l) => l.data)
         .join('')
         .replace(ANSI_RE, '')
@@ -109,16 +108,17 @@ function scheduleInactivityCheck(taskId: string): void {
       // Use the task's worktree for git context if available; fall back to project root
       const summaryCwd = task.worktree_path || task.project_path
 
-      const summary = await generateSessionSummary(
+      const summary = await generateSessionSummary({
         taskId,
+        agentId: task.process_type,
         userPrompts,
-        summaryCwd,
-        meta.startCommit,
-        newStatus,
-        claudeOutput,
-        existingSummary?.text,
-        maxLogId
-      )
+        cwd: summaryCwd,
+        startCommit: meta.startCommit,
+        status: newStatus,
+        agentOutput,
+        existingSummaryText: existingSummary?.text,
+        lastLogId: maxLogId
+      })
 
       const json = JSON.stringify(summary)
       appendTaskSummary(taskId, json)
@@ -168,81 +168,33 @@ function writeLarge(proc: pty.IPty, text: string, chunkSize = 2048, delayMs = 10
   writeNext()
 }
 
-// ---------------------------------------------------------------------------
-// Claude session file watcher
-// Claude stores each conversation as ~/.claude/projects/**/<uuid>.jsonl.
-// We snapshot existing files before launch, then poll for a new one to
-// appear — its basename (without .jsonl) is the session ID.
-// ---------------------------------------------------------------------------
-const CLAUDE_SESSION_FILE_RE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
-
-function scanClaudeSessionFiles(dir: string, found: Set<string>): void {
-  if (!existsSync(dir)) return
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        scanClaudeSessionFiles(join(dir, entry.name), found)
-      } else if (CLAUDE_SESSION_FILE_RE.test(entry.name)) {
-        found.add(join(dir, entry.name))
-      }
-    }
-  } catch { /* skip unreadable paths */ }
+export interface CreatePtySessionOptions {
+  taskId: string
+  /** Agent id (`tasks.process_type`) — decides status tracking and prompt handling. */
+  agentId: string
+  /** Executable + args produced by `resolveLaunch`. */
+  command: { cmd: string; args: string[] }
+  cwd: string
+  /** Prompt to type into the agent's TUI once it is ready (input-delivery agents). */
+  typedPrompt?: string
+  env?: Record<string, string>
+  cols?: number
+  rows?: number
 }
 
-/**
- * Call this BEFORE starting Claude. Returns a stop function.
- * When Claude creates a new session file, onFound is called with the session UUID.
- * The watcher stops itself once the ID is found or after `timeoutMs`.
- */
-export function watchForNewClaudeSession(
-  onFound: (sessionId: string) => void,
-  timeoutMs = 120_000
-): () => void {
-  const projectsDir = join(homedir(), '.claude', 'projects')
-  const before = new Set<string>()
-  scanClaudeSessionFiles(projectsDir, before)
+export function createPtySession(opts: CreatePtySessionOptions): string {
+  const {
+    taskId,
+    agentId,
+    command,
+    cwd,
+    typedPrompt,
+    env,
+    cols = 80,
+    rows = 24
+  } = opts
 
-  let stopped = false
-  const stop = (): void => { stopped = true }
-
-  const hardStop = setTimeout(stop, timeoutMs)
-
-  const poll = (): void => {
-    if (stopped) { clearTimeout(hardStop); return }
-
-    const current = new Set<string>()
-    scanClaudeSessionFiles(projectsDir, current)
-
-    for (const file of current) {
-      if (!before.has(file)) {
-        const name = file.split(/[\\/]/).pop() ?? ''
-        const m = CLAUDE_SESSION_FILE_RE.exec(name)
-        if (m) {
-          stopped = true
-          clearTimeout(hardStop)
-          onFound(m[1])
-          return
-        }
-      }
-    }
-
-    setTimeout(poll, 500)
-  }
-
-  setTimeout(poll, 500)
-  return stop
-}
-
-export function createPtySession(
-  taskId: string,
-  command: string,
-  args: string[],
-  cwd: string,
-  env?: Record<string, string>,
-  initialPrompt?: string,
-  cols = 80,
-  rows = 24
-): string {
+  const agent: AgentDefinition = getAgent(agentId)
   const sessionId = `pty-${taskId}`
   if (!pty) {
     console.warn('[relay] PTY session skipped — node-pty not available')
@@ -257,7 +209,9 @@ export function createPtySession(
     COLORTERM: 'truecolor'
   } as Record<string, string>
 
-  const isAgent = command !== shell
+  // A tracked agent gets status detection and summaries; a plain shell session
+  // (or a command that *is* the shell) is left alone.
+  const isAgent = agent.tracked && command.cmd !== shell
 
   // Always spawn an interactive shell — the agent command is written to it below.
   // This avoids ConPTY child-process handle-inheritance issues on Windows where
@@ -319,14 +273,17 @@ export function createPtySession(
   })
 
   if (isAgent) {
-    // Quote args that contain spaces so prompts passed via -p/--message aren't truncated
-    const quoteArg = (a: string): string => {
-      if (!/\s|"/.test(a)) return a
+    // Quote args that contain spaces so prompts passed on the command line aren't truncated
+    const quoteArg = (raw: string): string => {
+      const a = sanitizeArgForShell(raw)
+      if (!/\s|"|'/.test(a)) return a
       return process.platform === 'win32'
         ? `"${a.replace(/"/g, '""')}"` // cmd.exe: double inner quotes
         : `'${a.replace(/'/g, "'\\''")}'` // bash: single-quote with escaping
     }
-    const agentCmd = args.length ? `${command} ${args.map(quoteArg).join(' ')}` : command
+    const agentCmd = command.args.length
+      ? `${command.cmd} ${command.args.map(quoteArg).join(' ')}`
+      : command.cmd
 
     // Wait for the shell to produce its first output (proof it's alive), then
     // write the agent command 100 ms later.  Polling via the shared shellStarted
@@ -339,43 +296,46 @@ export function createPtySession(
 
       ptyProcess.write(`${agentCmd}\r`)
 
-      if (initialPrompt) {
-        // Two-signal approach to reliably deliver the initial prompt:
+      if (typedPrompt) {
+        // Two-signal approach to reliably deliver the initial prompt to an
+        // agent whose TUI expects it as keyboard input:
         //
-        // Signal A (fast path): detect Claude Code's interactive prompt indicator
-        //   ">" appearing at the end of the ANSI-stripped output stream.
-        //   Claude Code renders "> " (or "❯ ") when it's actually ready for input.
-        //   Once detected, we wait an additional 300 ms of silence so the TUI
-        //   finishes any residual rendering, then send.
+        // Signal A (fast path): the agent's own readiness marker
+        //   (`agent.promptReadyPattern`, e.g. Claude Code's "> " / "❯ ") appears
+        //   at the end of the ANSI-stripped output stream. Once detected, we
+        //   wait an additional 300 ms of silence so the TUI finishes any
+        //   residual rendering, then send.
         //
-        // Signal B (fallback): if the prompt indicator is never seen (e.g. a future
-        //   Claude version changes its UI), fire after 3 s of silence, but only
-        //   after at least 2 s have elapsed since the command was written — this
-        //   prevents sending during early banner bursts that have brief pauses.
+        // Signal B (fallback): if the agent declares no pattern, or its UI
+        //   changed in a newer version, fire after 3 s of silence, but only
+        //   after at least 2 s have elapsed since the command was written —
+        //   this prevents sending during early banner bursts that have brief
+        //   pauses.
         //
         // Hard fallback at 30 s covers extremely slow first-time startups.
 
+        const readyPattern = agent.promptReadyPattern
         let promptSent = false
         let lastOutput = Date.now()
         const cmdWrittenAt = Date.now()
 
-        // Accumulate ANSI-stripped output to detect the Claude Code prompt
+        // Accumulate ANSI-stripped output to detect the readiness marker
         let cleanBuf = ''
-        let promptIndicatorAt = 0  // timestamp when "> " was first detected
+        let promptIndicatorAt = 0  // timestamp when the marker was first detected
 
         const outputWatcher = ptyProcess.onData((data) => {
           if (promptSent) return
+          // Tracked for Signal B regardless of whether the agent declares a marker
           lastOutput = Date.now()
+          if (!readyPattern) return
 
-          // Strip ANSI and accumulate for prompt detection
+          // Strip ANSI and accumulate for readiness detection
           const clean = data.replace(ANSI_RE, '').replace(/\r/g, '')
           cleanBuf += clean
           if (cleanBuf.length > 6000) cleanBuf = cleanBuf.slice(-6000)
 
-          // Detect Claude Code's prompt: ">" (optionally with whitespace) at the
-          // very end of accumulated output, preceded by a newline or start.
           // Require at least 100 chars so we don't fire on the shell prompt itself.
-          if (!promptIndicatorAt && cleanBuf.length > 100 && /(?:^|\n)\s*[>❯]\s*$/.test(cleanBuf)) {
+          if (!promptIndicatorAt && cleanBuf.length > 100 && readyPattern.test(cleanBuf)) {
             promptIndicatorAt = Date.now()
           }
         })
@@ -385,7 +345,7 @@ export function createPtySession(
           promptSent = true
           clearInterval(checkInterval)
           outputWatcher.dispose()
-          writeLarge(ptyProcess, initialPrompt, 64, 25, () => {
+          writeLarge(ptyProcess, typedPrompt, 64, 25, () => {
             if (sessions.has(sessionId)) ptyProcess.write('\r')
           })
         }

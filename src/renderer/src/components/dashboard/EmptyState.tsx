@@ -22,7 +22,7 @@ export function EmptyState() {
       </h2>
       <p className="text-sm text-zinc-500 max-w-sm leading-relaxed mb-8">
         Relay Flowstate turns AI coding sessions into persistent, resumable workspaces.
-        Start a task to begin working with Claude Code, Aider, or any CLI agent.
+        Start a task to begin working with Claude Code, Codex, or any CLI agent.
       </p>
 
       <Button variant="primary" onClick={openCreateModal} className="gap-2 mb-10">
@@ -41,7 +41,7 @@ export function EmptyState() {
           {
             icon: '🔀',
             title: 'Multi-agent',
-            desc: 'Claude Code, Aider, OpenCode — all in one place.'
+            desc: 'Claude Code, Codex — all in one place.'
           },
           {
             icon: '📁',

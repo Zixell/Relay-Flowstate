@@ -1,6 +1,6 @@
 # Relay Flowstate
 
-**Relay Flowstate** is a desktop app for managing multiple AI coding agent sessions in one place. Run Claude Code, Aider, OpenCode, or any CLI tool in parallel — track their progress, review changes, and pick up where you left off.
+**Relay Flowstate** is a desktop app for managing multiple AI coding agent sessions in one place. Run Claude Code, Codex, or any CLI agent in parallel — track their progress, review changes, and pick up where you left off.
 
 Built with Electron, React, and TypeScript. Data is stored locally via SQLite — no cloud, no accounts.
 
@@ -14,7 +14,7 @@ Modern AI coding agents are powerful but hard to manage when you have multiple t
 - A real terminal inside each task — full PTY, no limitations
 - Git-aware file change tracking scoped to each session
 - Automatic session summaries so you always know what happened
-- Context injection that catches agents up on previous sessions automatically
+- Session resume that picks up each agent's own conversation where it left off
 
 ---
 
@@ -24,10 +24,15 @@ Modern AI coding agents are powerful but hard to manage when you have multiple t
 See all your tasks at a glance — grouped by status (Running, Waiting for Input, Completed, Failed), with live status indicators, runtime counters, and a terminal preview of the latest output.
 
 ### Supported agents
-- **Claude Code** — launched with `--dangerously-skip-permissions` for unattended operation
-- **Aider** — launched with `--yes` for auto-confirmations
-- **OpenCode** — launched in interactive mode
-- **Generic CLI** — any shell command or tool, full interactive terminal
+
+| Agent | Launch | Session resume | Summaries |
+|---|---|---|---|
+| **Claude Code** | `claude --dangerously-skip-permissions` | `claude --resume <id>` | `claude --print` |
+| **Codex** | `codex --dangerously-bypass-approvals-and-sandbox "<prompt>"` | `codex resume <id>` | `codex exec --json` |
+| **Aider**, **OpenCode**, **Generic CLI** | defined, not yet enabled in the picker | — | — |
+
+Every agent is one file in `src/main/agents/` — see [Adding an agent](#adding-an-agent).
+Agents whose CLI isn't on your PATH are shown as *not installed* in the picker and in Settings.
 
 ### Full terminal emulator
 Each task has a real pseudo-terminal (PTY) with xterm-256color and true color support. Type directly, resize the terminal, send interrupts — it behaves exactly like a real terminal.
@@ -36,7 +41,7 @@ Each task has a real pseudo-terminal (PTY) with xterm-256color and true color su
 Relay Flowstate monitors agent output to detect state automatically:
 - **Running** — agent is producing output
 - **Waiting for Input** — agent has been idle for 15 seconds and appears to be waiting
-- **Completed** — agent output matched a completion pattern (e.g. Claude's timing suffix)
+- **Completed** — agent stopped producing output (inactivity window elapsed)
 - **Failed** — process exited with a non-zero code
 
 Status is locked after completion or when waiting, and only unlocks when you send a new prompt — preventing false "running" flickers.
@@ -49,15 +54,25 @@ Each task tracks its own git branch. Relay Flowstate can:
 - Scope the diff using the commit recorded at session start
 
 ### Automatic session summaries
-When a task completes or goes idle, Relay Flowstate generates a plain-English summary of the session using the Claude CLI. The summary includes:
+When a task completes or goes idle, Relay Flowstate generates a plain-English summary of the session by running an agent CLI headlessly — the task's own agent first, then any other installed one. The summary includes:
 - What was accomplished (2-4 sentences, action-verb style)
 - Which files were modified
 - Which commits were made
 
-If the Claude CLI is not available, Relay Flowstate falls back to a git-based summary.
+If no agent CLI is available, Relay Flowstate falls back to a git-based summary.
 
-### Context injection on restart
-When you restart a paused or completed task, Relay Flowstate can automatically prepend the previous session summary as context — so the agent knows exactly what was done before and can continue without repetition. Controlled via the **Auto inject relay context** setting.
+### Session resume
+Each agent records its conversation in its own session store (`~/.claude/projects` for Claude Code, `~/.codex/sessions` for Codex). Relay Flowstate snapshots that directory before launching, captures the id of the session file the agent creates, and stores it on the task. Restarting the task then resumes that exact conversation instead of starting over.
+
+Restart resolves in three steps, and the terminal states which one was used:
+
+| Situation | What runs | Terminal says |
+|---|---|---|
+| Session id captured | `claude --resume <id>` / `codex resume <id>` | Session resumed |
+| No id, but the agent can continue by directory | `claude --continue` | Continued latest conversation in this directory |
+| Nothing to continue | plain launch | New session started |
+
+The middle step is per-agent and opt-in: it exists for Claude Code, whose `--continue` is scoped to the working directory. Codex deliberately has no fallback — its `resume --last` is global and would adopt another task's conversation. Starting a **new** task never uses this path, so a fresh task always gets a fresh conversation.
 
 ### Project management
 Organize tasks under projects. Each project has a name, file path, and optional description. Filter the dashboard by project to focus on what matters.
@@ -87,7 +102,7 @@ All data (projects, tasks, terminal logs, events, summaries) is stored in a loca
 
 - Node.js 18+
 - Git
-- Claude Code, Aider, or OpenCode installed and available on PATH (at least one)
+- Claude Code or Codex installed and available on PATH (at least one)
 
 ### Install and run
 
@@ -111,11 +126,12 @@ The packaged app will be in `dist/`.
 ```
 src/
   main/           # Electron main process
+    agents/       # Agent abstraction — one file per supported agent
     db/           # SQLite schema and queries
     git/          # Git branch management and diff parsing
     ipc/          # IPC handlers (bridge between main and renderer)
     pty/          # PTY session lifecycle and status detection
-    summary/      # Session summary generation via Claude CLI
+    summary/      # Session summary generation via a headless agent CLI
     settings.ts   # App settings (persisted in DB)
   renderer/       # React frontend
     components/
@@ -129,11 +145,66 @@ src/
 
 ---
 
+## Adding an agent
+
+All agent-specific knowledge lives behind one interface, `AgentDefinition` (`src/main/agents/types.ts`). Nothing in the PTY manager, the summary generator, the IPC layer or the UI branches on which agent is running.
+
+1. Create `src/main/agents/<your-agent>.ts` exporting an `AgentDefinition`:
+
+```ts
+export const myAgent: AgentDefinition = {
+  id: 'my-agent',              // persisted in tasks.process_type — never change it
+  label: 'My Agent',
+  description: 'What it does',
+  color: '#22d3ee',
+  enabled: true,
+
+  binary: 'my-agent',          // probed on PATH to report availability
+  versionArgs: ['--version'],
+
+  tracked: true,               // enable status detection + summaries
+  promptDelivery: 'arg',       // 'arg' | 'input' | 'none'
+
+  buildLaunchCommand: ({ prompt, getBool }) => ({ cmd: 'my-agent', args: [...] }),
+  buildResumeCommand: ({ resumeSessionId }) =>
+    resumeSessionId ? { cmd: 'my-agent', args: ['resume', resumeSessionId] } : null,
+
+  // Optional: only if the agent continues the newest conversation *of this
+  // directory*. Omit when its "continue" is global — it would adopt another
+  // task's session. Guarded by hasSessionForCwd.
+  buildContinueCommand: () => ({ cmd: 'my-agent', args: ['--continue'] }),
+  hasSessionForCwd: (cwd) => existsSync(sessionDirFor(cwd)),
+
+  sessionDiscovery: {          // where the agent records conversations
+    rootDir: join(homedir(), '.my-agent', 'sessions'),
+    filePattern: /^session-(.+)\.jsonl$/   // capture group 1 = resume id
+  },
+
+  headless: {                  // used to write session summaries
+    cmd: 'my-agent', args: ['run', '--quiet'], promptVia: 'stdin'
+  },
+
+  settings: [/* toggles rendered automatically in the Settings modal */]
+}
+```
+
+2. Add it to the `AGENTS` array in `src/main/agents/registry.ts`.
+
+That's it. The agent picker, the availability badges, the Settings toggles, status tracking, session resume and summary generation all pick it up from the catalog served by `agents:list`.
+
+**Prompt delivery** is the one thing worth choosing carefully:
+- `'arg'` — the prompt goes on the command line and the agent starts working immediately (Codex). Most reliable; newlines are collapsed on Windows since `cmd.exe` cannot represent them.
+- `'input'` — the prompt is typed into the TUI once it signals readiness (Claude Code). Provide `promptReadyPattern` so delivery is fast; without one it falls back to silence detection.
+- `'none'` — the agent takes no prompt (plain shell).
+
 ## Settings
 
 | Key | Description |
 |---|---|
-| `AUTO_INJECT_CONTEXT` | When `true`, injects the previous session summary as context when restarting a task |
+| `CLAUDE_SKIP_PERMISSIONS` | When not `false`, launches Claude Code with `--dangerously-skip-permissions` |
+| `CODEX_BYPASS_APPROVALS` | When not `false`, launches Codex with `--dangerously-bypass-approvals-and-sandbox`; otherwise `--full-auto` |
+
+Agent settings are declared by the agent definition itself and rendered automatically — there is no UI to update when you add one.
 
 ---
 

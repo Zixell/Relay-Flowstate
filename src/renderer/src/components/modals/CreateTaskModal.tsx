@@ -20,36 +20,6 @@ interface CreateTaskModalProps {
   onClose: () => void
 }
 
-const PROCESS_OPTIONS: { value: ProcessType; label: string; desc: string; color: string; disabled?: boolean }[] = [
-  {
-    value: 'claude-code',
-    label: 'Claude Code',
-    desc: 'Anthropic\'s coding agent',
-    color: 'bg-blue-500'
-  },
-  {
-    value: 'aider',
-    label: 'Aider',
-    desc: 'Coming soon',
-    color: 'bg-violet-500',
-    disabled: true
-  },
-  {
-    value: 'opencode',
-    label: 'OpenCode',
-    desc: 'Coming soon',
-    color: 'bg-emerald-500',
-    disabled: true
-  },
-  {
-    value: 'generic',
-    label: 'CLI Tool',
-    desc: 'Coming soon',
-    color: 'bg-orange-500',
-    disabled: true
-  }
-]
-
 const PROMPT_SUGGESTIONS = [
   'Refactor the auth module to use JWT refresh tokens',
   'Fix the N+1 query in the users endpoint',
@@ -59,12 +29,18 @@ const PROMPT_SUGGESTIONS = [
 ]
 
 export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
-  const { projects, addTask, addProject } = useAppStore()
+  const { projects, agents, addTask, addProject, loadAgents } = useAppStore()
+
+  /** First installed agent, else first selectable one — used as the initial choice. */
+  const defaultAgentId = (): ProcessType => {
+    const selectable = agents.filter((a) => a.enabled)
+    return (selectable.find((a) => a.available) ?? selectable[0])?.id ?? 'claude-code'
+  }
 
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [processType, setProcessType] = useState<ProcessType>('claude-code')
+  const [processType, setProcessType] = useState<ProcessType>(defaultAgentId)
   const [branch, setBranch] = useState('')
   const [isCreating, setIsCreating] = useState(false)
   const [newProjectPath, setNewProjectPath] = useState('')
@@ -72,6 +48,17 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
   const [localBranches, setLocalBranches] = useState<string[]>([])
 
   const isElectron = typeof window !== 'undefined' && !!window.api
+
+  // Re-probe which agent CLIs are installed each time the modal opens
+  useEffect(() => {
+    if (open) loadAgents()
+  }, [open, loadAgents])
+
+  // Keep the selection valid once the real catalog arrives
+  useEffect(() => {
+    const current = agents.find((a) => a.id === processType)
+    if (!current?.enabled) setProcessType(defaultAgentId())
+  }, [agents]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch branches whenever a project path is selected
   useEffect(() => {
@@ -176,7 +163,7 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
     setTitle('')
     setPrompt('')
     setProjectId('')
-    setProcessType('claude-code')
+    setProcessType(defaultAgentId())
     setBranch('')
     setNewProjectPath('')
     setLocalBranches([])
@@ -249,33 +236,47 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
             )}
           </Field>
 
-          {/* Agent */}
+          {/* Agent — catalog comes from the main process, so new agents appear here automatically */}
           <Field label="Agent">
-            <div className="grid grid-cols-4 gap-2">
-              {PROCESS_OPTIONS.map((opt) => {
-                const selected = processType === opt.value
+            <div className="grid grid-cols-3 gap-2">
+              {agents.map((agent) => {
+                const selected = processType === agent.id
+                const disabled = !agent.enabled
                 return (
                   <button
-                    key={opt.value}
+                    key={agent.id}
                     type="button"
-                    disabled={opt.disabled}
-                    onClick={() => !opt.disabled && setProcessType(opt.value)}
+                    disabled={disabled}
+                    title={
+                      disabled
+                        ? agent.description
+                        : agent.available
+                          ? agent.description
+                          : `${agent.description} — CLI not found on PATH`
+                    }
+                    onClick={() => !disabled && setProcessType(agent.id)}
                     className={[
                       'relative flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-2.5 transition-colors',
-                      opt.disabled
+                      disabled
                         ? 'cursor-not-allowed border-white/[0.04] bg-white/[0.01] opacity-40'
                         : selected
                           ? 'border-blue-500/50 bg-blue-500/10 text-zinc-100'
                           : 'border-white/[0.07] bg-white/[0.02] text-zinc-400 hover:border-white/[0.12] hover:text-zinc-300'
                     ].join(' ')}
                   >
-                    <div className="flex flex-col items-start">
-                      <span className="text-[11px] font-medium leading-tight">{opt.label}</span>
-                      {opt.disabled && (
+                    <div className="flex flex-col items-start min-w-0">
+                      <span className="text-[11px] font-medium leading-tight truncate">{agent.label}</span>
+                      {disabled && (
                         <span className="text-[9px] text-zinc-600 leading-none">soon</span>
                       )}
+                      {!disabled && !agent.available && (
+                        <span className="text-[9px] text-amber-500/70 leading-none">not installed</span>
+                      )}
                     </div>
-                    <span className={`w-2 h-2 rounded-full ${opt.color} shrink-0`} />
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: agent.color }}
+                    />
                   </button>
                 )
               })}

@@ -1,11 +1,26 @@
 import { create } from 'zustand'
-import type { Task, Project } from '../types'
+import type { Task, Project, AgentDescriptor } from '../types'
+import { PROCESS_LABELS, PROCESS_COLORS } from '../types'
 import { MOCK_TASKS, MOCK_PROJECTS } from '../lib/mockData'
+
+/** Catalog used in browser / mock mode, where the main process isn't reachable. */
+const FALLBACK_AGENTS: AgentDescriptor[] = ['claude-code', 'codex'].map((id) => ({
+  id,
+  label: PROCESS_LABELS[id],
+  description: '',
+  color: PROCESS_COLORS[id],
+  enabled: true,
+  available: false,
+  supportsResume: true,
+  supportsSummaries: true,
+  settings: []
+}))
 
 interface AppState {
   // Data
   tasks: Task[]
   projects: Project[]
+  agents: AgentDescriptor[]
   selectedTaskId: string | null
   selectedProjectId: string | null
   searchQuery: string
@@ -32,6 +47,7 @@ interface AppState {
   deleteProject: (id: string) => void
   loadData: () => Promise<void>
   refreshTasks: () => Promise<void>
+  loadAgents: () => Promise<void>
 }
 
 const isElectron = typeof window !== 'undefined' && !!window.api
@@ -39,6 +55,7 @@ const isElectron = typeof window !== 'undefined' && !!window.api
 export const useAppStore = create<AppState>((set, get) => ({
   tasks: isElectron ? [] : MOCK_TASKS,
   projects: isElectron ? [] : MOCK_PROJECTS,
+  agents: FALLBACK_AGENTS,
   selectedTaskId: null,
   selectedProjectId: null,
   searchQuery: '',
@@ -102,6 +119,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Keep mock data on error
     } finally {
       set({ isLoading: false })
+    }
+    await get().loadAgents()
+  },
+
+  loadAgents: async () => {
+    if (!isElectron || !window.api.agents) return
+    try {
+      const agents: AgentDescriptor[] = await window.api.agents.list()
+      if (agents?.length) set({ agents })
+    } catch {
+      // Keep the fallback catalog
     }
   },
 

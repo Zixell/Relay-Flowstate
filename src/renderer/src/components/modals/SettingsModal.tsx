@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Terminal, CheckCircle2, XCircle, FileText, Info } from 'lucide-react'
 import {
   Dialog,
@@ -8,6 +8,8 @@ import {
   DialogDescription
 } from '../ui/dialog'
 import { cn } from '../../lib/utils'
+import { useAppStore } from '../../stores/appStore'
+import type { AgentDescriptor } from '../../types'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -17,25 +19,40 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
-  const [claudeAvailable, setClaudeAvailable] = useState<boolean | null>(null)
-  const [skipPermissions, setSkipPermissions] = useState(true)
+  const agents = useAppStore((s) => s.agents)
+  const loadAgents = useAppStore((s) => s.loadAgents)
+  // Values of every agent-declared setting, keyed by settings key
+  const [values, setValues] = useState<Record<string, boolean>>({})
+
+  const selectable = agents.filter((a) => a.enabled)
 
   useEffect(() => {
     if (!open || !isElectron) return
-    window.api.settings.get('CLAUDE_CLI_AVAILABLE').then((val: string) => {
-      setClaudeAvailable(val === 'true')
-    })
-    window.api.settings.get('CLAUDE_SKIP_PERMISSIONS').then((val: string) => {
-      // default true — matches original behaviour
-      setSkipPermissions(val !== 'false')
-    })
-  }, [open])
+    loadAgents()
+  }, [open, loadAgents])
 
-  function toggleSkipPermissions() {
-    const next = !skipPermissions
-    setSkipPermissions(next)
-    if (isElectron) window.api.settings.set('CLAUDE_SKIP_PERMISSIONS', String(next))
-  }
+  // Load the persisted value of every setting declared by any agent
+  useEffect(() => {
+    if (!open || !isElectron) return
+    let cancelled = false
+    const defs = agents.flatMap((a) => a.settings)
+    Promise.all(
+      defs.map(async (def) => {
+        const raw: string = await window.api.settings.get(def.key)
+        return [def.key, raw === '' ? def.default : raw !== 'false'] as const
+      })
+    ).then((entries) => {
+      if (!cancelled) setValues(Object.fromEntries(entries))
+    })
+    return () => { cancelled = true }
+  }, [open, agents])
+
+  const toggle = useCallback((key: string, next: boolean) => {
+    setValues((v) => ({ ...v, [key]: next }))
+    if (isElectron) window.api.settings.set(key, String(next))
+  }, [])
+
+  const anySummaryAgent = selectable.some((a) => a.supportsSummaries && a.available)
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -47,50 +64,23 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5 px-6 pb-6 pt-1">
+        <div className="flex flex-col gap-5 px-6 pb-6 pt-1 max-h-[70vh] overflow-y-auto">
 
-          {/* Claude CLI status */}
+          {/* Agent CLI status */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">Claude Code CLI</span>
+              <span className="text-sm font-medium text-zinc-200">Agent CLIs</span>
             </div>
             <p className="text-xs text-zinc-500 leading-relaxed">
-              Session summaries are generated automatically using your local{' '}
-              <span className="font-mono text-zinc-400">claude</span> CLI after each completed prompt —
-              no API credits required.
+              Tasks run in a real terminal using the agent's own CLI. Session summaries
+              are generated locally by whichever agent CLI is installed — no API credits required.
             </p>
 
-            <div className={cn(
-              'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border',
-              claudeAvailable === true
-                ? 'bg-emerald-400/5 border-emerald-400/20'
-                : claudeAvailable === false
-                  ? 'bg-red-400/5 border-red-400/20'
-                  : 'bg-white/[0.02] border-white/[0.07]'
-            )}>
-              {claudeAvailable === true && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
-              {claudeAvailable === false && <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
-              {claudeAvailable === null && <div className="w-4 h-4 rounded-full border-2 border-zinc-600 border-t-zinc-400 animate-spin shrink-0" />}
-              <div>
-                {claudeAvailable === true && (
-                  <>
-                    <p className="text-xs font-medium text-emerald-400">claude CLI detected</p>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">Summaries will be generated automatically</p>
-                  </>
-                )}
-                {claudeAvailable === false && (
-                  <>
-                    <p className="text-xs font-medium text-red-400">claude CLI not found</p>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
-                      Install Claude Code to enable summaries
-                    </p>
-                  </>
-                )}
-                {claudeAvailable === null && (
-                  <p className="text-xs text-zinc-500">Checking...</p>
-                )}
-              </div>
+            <div className="flex flex-col gap-2">
+              {selectable.map((agent) => (
+                <AgentStatusRow key={agent.id} agent={agent} />
+              ))}
             </div>
           </div>
 
@@ -105,8 +95,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             <div className="flex flex-col gap-2">
               {[
                 'Triggered after 15 seconds of agent inactivity',
-                'Runs claude --print in the background (no terminal window)',
+                'Runs the agent CLI headlessly in the background (no terminal window)',
                 'One summary per task — updated incrementally after each session',
+                anySummaryAgent
+                  ? 'Falls back to a git-based summary if the CLI call fails'
+                  : 'No agent CLI detected — summaries fall back to git history'
               ].map((item) => (
                 <div key={item} className="flex items-start gap-2 text-xs text-zinc-400">
                   <Info className="w-3 h-3 text-zinc-600 mt-0.5 shrink-0" />
@@ -116,43 +109,87 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
           </div>
 
-          <div className="h-px bg-white/[0.05]" />
+          {/* Per-agent launch options, declared by each agent definition */}
+          {selectable
+            .filter((a) => a.settings.length > 0)
+            .map((agent) => (
+              <React.Fragment key={agent.id}>
+                <div className="h-px bg-white/[0.05]" />
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: agent.color }}
+                    />
+                    <span className="text-sm font-medium text-zinc-200">
+                      {agent.label} Launch Options
+                    </span>
+                  </div>
 
-          {/* Claude launch options */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">Claude Launch Options</span>
-            </div>
-
-            <div className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
-              <button
-                role="checkbox"
-                aria-checked={skipPermissions}
-                onClick={toggleSkipPermissions}
-                className={cn(
-                  'relative mt-0.5 w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 focus:outline-none',
-                  skipPermissions ? 'bg-violet-500' : 'bg-zinc-700'
-                )}
-              >
-                <span className={cn(
-                  'absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform duration-200',
-                  skipPermissions ? 'translate-x-[14px]' : 'translate-x-0'
-                )} />
-              </button>
-              <div>
-                <p className="text-xs font-medium text-zinc-200 leading-snug">Skip permissions bypass</p>
-                <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
-                  Passes <span className="font-mono text-zinc-400">--dangerously-skip-permissions</span> when
-                  launching Claude. Disable if you prefer Claude to ask for confirmation before
-                  making file changes. Takes effect on the next session start or restart.
-                </p>
-              </div>
-            </div>
-          </div>
+                  {agent.settings.map((def) => (
+                    <div
+                      key={def.key}
+                      className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]"
+                    >
+                      <button
+                        role="checkbox"
+                        aria-checked={values[def.key] ?? def.default}
+                        onClick={() => toggle(def.key, !(values[def.key] ?? def.default))}
+                        className={cn(
+                          'relative mt-0.5 w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 focus:outline-none',
+                          (values[def.key] ?? def.default) ? 'bg-violet-500' : 'bg-zinc-700'
+                        )}
+                      >
+                        <span className={cn(
+                          'absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform duration-200',
+                          (values[def.key] ?? def.default) ? 'translate-x-[14px]' : 'translate-x-0'
+                        )} />
+                      </button>
+                      <div>
+                        <p className="text-xs font-medium text-zinc-200 leading-snug">{def.label}</p>
+                        <p className="text-[11px] text-zinc-500 mt-1.5 leading-relaxed">
+                          {def.description}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </React.Fragment>
+            ))}
 
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function AgentStatusRow({ agent }: { agent: AgentDescriptor }) {
+  return (
+    <div className={cn(
+      'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border',
+      agent.available
+        ? 'bg-emerald-400/5 border-emerald-400/20'
+        : 'bg-red-400/5 border-red-400/20'
+    )}>
+      {agent.available
+        ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+        : <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
+      <div className="min-w-0">
+        <p className={cn(
+          'text-xs font-medium',
+          agent.available ? 'text-emerald-400' : 'text-red-400'
+        )}>
+          {agent.label} {agent.available ? 'detected' : 'not found'}
+        </p>
+        <p className="text-[11px] text-zinc-500 mt-0.5">
+          {agent.available
+            ? [
+                agent.supportsResume ? 'sessions resume' : null,
+                agent.supportsSummaries ? 'summaries' : null
+              ].filter(Boolean).join(' · ') || 'ready'
+            : `Install ${agent.label} to run tasks with it`}
+        </p>
+      </div>
+    </div>
   )
 }

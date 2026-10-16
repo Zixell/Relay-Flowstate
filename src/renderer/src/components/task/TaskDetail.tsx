@@ -18,7 +18,7 @@ import {
   Check
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
-import { STATUS_CONFIG, PROCESS_LABELS, PROCESS_COLORS, type Task } from '../../types'
+import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { Terminal } from './Terminal'
@@ -44,6 +44,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const [mergeError, setMergeError] = useState<string | null>(null)
   const selectTask = useAppStore((s) => s.selectTask)
   const updateTask = useAppStore((s) => s.updateTask)
+  const agents = useAppStore((s) => s.agents)
 
   // Sync notes when task changes
   useEffect(() => {
@@ -126,7 +127,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
 
   const statusCfg = STATUS_CONFIG[task.status]
-  const processColor = PROCESS_COLORS[task.process_type]
+  const agentColor = processColor(task.process_type, agents)
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -158,13 +159,13 @@ export function TaskDetail({ task }: TaskDetailProps) {
                 {/* Process */}
                 <div
                   className="flex items-center gap-1.5 text-[11px] font-medium"
-                  style={{ color: processColor }}
+                  style={{ color: agentColor }}
                 >
                   <span
                     className="w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: processColor }}
+                    style={{ backgroundColor: agentColor }}
                   />
-                  {PROCESS_LABELS[task.process_type]}
+                  {processLabel(task.process_type, agents)}
                 </div>
 
                 {/* Project */}
@@ -427,7 +428,7 @@ function SessionSummaryList({ summaries }: { summaries: SessionSummaryEntry[] })
       <div className="flex flex-col items-center justify-center h-48 gap-2 text-zinc-600">
         <CheckCircle2 className="w-6 h-6 opacity-30" />
         <p className="text-xs">No summary yet — generated automatically after 15 s of agent inactivity</p>
-        <p className="text-[11px] text-zinc-700">Requires the claude CLI to be installed</p>
+        <p className="text-[11px] text-zinc-700">Requires an agent CLI (Claude Code or Codex) to be installed</p>
       </div>
     )
   }

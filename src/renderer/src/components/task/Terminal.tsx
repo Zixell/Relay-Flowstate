@@ -12,6 +12,13 @@ import '@xterm/xterm/css/xterm.css'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
+/** Tells the user whether the agent picked up its previous conversation. */
+function restartLabel(resumeMode?: string): string {
+  if (resumeMode === 'session-id') return 'Session resumed'
+  if (resumeMode === 'continue') return 'Continued latest conversation in this directory'
+  return 'New session started'
+}
+
 const XTERM_THEME = {
   background: '#0a0a0a',
   foreground: '#e4e4e7',
@@ -100,10 +107,10 @@ export function Terminal({ task, className }: TerminalProps) {
     if (!isElectron || !xtermRef.current) return
     setRestarting(true)
     try {
-      await window.api.pty.restart(task.id, xtermRef.current.cols, xtermRef.current.rows)
+      const res = await window.api.pty.restart(task.id, xtermRef.current.cols, xtermRef.current.rows)
       updateTask(task.id, { status: 'running', updated_at: Math.floor(Date.now() / 1000) })
       setNoSession(false)
-      xtermRef.current.write('\r\n\x1b[90m─── Session restarted ───\x1b[0m\r\n')
+      xtermRef.current.write(`\r\n\x1b[90m─── ${restartLabel(res?.resumeMode)} ───\x1b[0m\r\n`)
     } catch (e) {
       xtermRef.current.write(`\r\n\x1b[31m✗ Failed to restart: ${e}\x1b[0m\r\n`)
     } finally {
@@ -122,7 +129,7 @@ export function Terminal({ task, className }: TerminalProps) {
       cursorBlink: true,
       scrollback: 100000,  // keep full history in memory
       allowProposedApi: true
-      // convertEol intentionally omitted — Claude Code manages its own line endings via \r\n
+      // convertEol intentionally omitted — agent TUIs manage their own line endings via \r\n
     })
 
     const fitAddon = new FitAddon()
@@ -204,10 +211,10 @@ export function Terminal({ task, className }: TerminalProps) {
           const freshTask = await (window.api.tasks.getById(task.id) as Promise<{ status: string } | null>)
           if (freshTask?.status === 'running') {
             try {
-              await window.api.pty.restart(task.id, xterm.cols, xterm.rows)
+              const res = await window.api.pty.restart(task.id, xterm.cols, xterm.rows)
               updateTask(task.id, { status: 'running', updated_at: Math.floor(Date.now() / 1000) })
               if (logs.length > 0) {
-                xterm.write('\r\n\x1b[90m─── Session resumed ───\x1b[0m\r\n')
+                xterm.write(`\r\n\x1b[90m─── ${restartLabel(res?.resumeMode)} ───\x1b[0m\r\n`)
               }
             } catch {
               xterm.write('\r\n\x1b[31m✗ Could not resume session — use Restart button\x1b[0m\r\n')
