@@ -48,7 +48,7 @@ import {
   ensureBranchExists,
   commitAllAndMerge
 } from '../git'
-import { addWorktree, removeWorktree } from '../git/worktree'
+import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
 import { getMessages, getTurns, getTurn, type MessageRow } from '../db'
 import { deleteSnapshots, diffSnapshotFiles, diffSnapshots, restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
@@ -119,6 +119,12 @@ function startAgentSession(params: {
   return { resumed: launch.resumed, resumeMode: launch.resumeMode }
 }
 
+function worktreeIssueText(issue?: string): string {
+  if (issue === 'not-git') return 'the project is not a git repository'
+  if (issue === 'no-commits') return 'the repository has no commits yet'
+  return issue || 'worktree could not be created'
+}
+
 function emitTaskEvent(event: { id: string; task_id: string; type: string; content: string; metadata: string | null; timestamp?: number }): void {
   const win = BrowserWindow.getAllWindows()[0]
   if (win) {
@@ -151,15 +157,20 @@ export function registerIpcHandlers(): void {
       // in parallel without branch-switching conflicts in the main checkout.
       let worktreePath = ''
       let branchCreated = false
+      // Recorded on the task so the UI can say why it is not isolated.
+      let worktreeIssue: string | undefined
       if (cwd) {
-        try {
-          // branch is the merge TARGET — always auto-create the task's working branch
-          const result = addWorktree(cwd, id)
-          worktreePath = result.worktreePath
-          branchCreated = result.branchCreated
-        } catch (err) {
-          // Non-git project: fall back to running in project dir
-          console.warn('[relay] Worktree creation skipped, running in project directory:', err)
+        worktreeIssue = checkWorktreeSupport(cwd) ?? undefined
+        if (!worktreeIssue) {
+          try {
+            // branch is the merge TARGET — always auto-create the task's working branch
+            const result = addWorktree(cwd, id)
+            worktreePath = result.worktreePath
+            branchCreated = result.branchCreated
+          } catch (err) {
+            console.warn('[relay] Worktree creation failed, running in project directory:', err)
+            worktreeIssue = err instanceof Error ? err.message : String(err)
+          }
         }
         // Ensure merge target branch exists in main repo (create from HEAD if missing)
         if (branch) {
@@ -184,7 +195,7 @@ export function registerIpcHandlers(): void {
         process_type: processType,
         branch,
         worktree_path: worktreePath || undefined,
-        metadata: JSON.stringify({ startCommit }),
+        metadata: JSON.stringify({ startCommit, worktreeIssue }),
         transport,
         model,
         mode
@@ -198,6 +209,15 @@ export function registerIpcHandlers(): void {
         content: prompt,
         metadata: JSON.stringify({ processType })
       })
+
+      if (cwd && !worktreePath) {
+        insertTaskEvent({
+          id: randomUUID(),
+          task_id: id,
+          type: 'system',
+          content: `No isolated worktree — the agent works directly in ${cwd} (${worktreeIssueText(worktreeIssue)})`
+        })
+      }
 
       if (branch || worktreePath) {
         const worktreeNote = worktreePath ? ` (worktree: ${worktreePath})` : ''
@@ -435,6 +455,7 @@ export function registerIpcHandlers(): void {
   })
 
   // --- Git ---
+  ipcMain.handle('git:worktreeSupport', (_, cwd: string) => checkWorktreeSupport(cwd))
   ipcMain.handle('git:getBranches', (_, cwd: string) => getLocalBranches(cwd))
   ipcMain.handle('git:getWorkingStatus', (_, cwd: string) => getWorkingDirStatus(cwd))
   ipcMain.handle('git:stage', (_, { cwd, files }: { cwd: string; files: string[] }) =>

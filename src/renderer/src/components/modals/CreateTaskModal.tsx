@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { WorktreeWarning } from '../task/WorktreeWarning'
 import { FolderOpen, GitBranch, Play, Zap, ChevronDown } from 'lucide-react'
 import {
   Dialog,
@@ -46,6 +47,7 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
   const [newProjectPath, setNewProjectPath] = useState('')
   const [error, setError] = useState('')
   const [localBranches, setLocalBranches] = useState<string[]>([])
+  const [worktreeIssue, setWorktreeIssue] = useState<'not-git' | 'no-commits' | null>(null)
 
   const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -63,8 +65,9 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
   // Fetch branches whenever a project path is selected
   useEffect(() => {
     const path = newProjectPath || (projectId ? projects.find((p) => p.id === projectId)?.path : '')
-    if (!path || !isElectron) { setLocalBranches([]); return }
+    if (!path || !isElectron) { setLocalBranches([]); setWorktreeIssue(null); return }
     window.api.git.getBranches(path).then(setLocalBranches).catch(() => setLocalBranches([]))
+    window.api.git.worktreeSupport(path).then(setWorktreeIssue).catch(() => setWorktreeIssue(null))
   }, [newProjectPath, projectId, projects, isElectron])
 
   const handleFolderPick = async () => {
@@ -316,6 +319,12 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
             />
           </Field>
         </div>
+
+        {worktreeIssue && (
+          <div className="px-6 pb-2">
+            <WorktreeWarning issue={worktreeIssue} />
+          </div>
+        )}
 
         {error && (
           <div className="px-6 pb-2">

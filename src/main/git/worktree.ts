@@ -26,6 +26,21 @@ function git(args: string[], cwd: string): { success: boolean; stdout: string; s
   }
 }
 
+/** Why a project cannot get isolated task worktrees. */
+export type WorktreeIssue = 'not-git' | 'no-commits'
+
+/**
+ * Checks whether tasks in `repoPath` can run in their own worktree.
+ * Returns null when they can. Without isolation a task works directly in the
+ * user's checkout, so the UI warns about it.
+ */
+export function checkWorktreeSupport(repoPath: string): WorktreeIssue | null {
+  if (git(['rev-parse', '--is-inside-work-tree'], repoPath).stdout !== 'true') return 'not-git'
+  // A worktree branches off HEAD, which does not exist before the first commit.
+  if (!git(['rev-parse', '--verify', 'HEAD'], repoPath).success) return 'no-commits'
+  return null
+}
+
 /** Absolute path where all task worktrees are stored: userData/worktrees/task-<id> */
 export function getWorktreePath(taskId: string): string {
   return join(app.getPath('userData'), 'worktrees', `task-${taskId}`)

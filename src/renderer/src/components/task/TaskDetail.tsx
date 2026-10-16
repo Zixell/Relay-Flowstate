@@ -24,6 +24,7 @@ import { Button } from '../ui/button'
 import { Terminal } from './Terminal'
 import { SidecarConsole } from './SidecarConsole'
 import { ChatView } from '../chat/ChatView'
+import { WorktreeWarning } from './WorktreeWarning'
 import { TaskTimeline } from './TaskTimeline'
 import { FileChanges } from './FileChanges'
 import { useAppStore } from '../../stores/appStore'
@@ -262,6 +263,18 @@ export function TaskDetail({ task }: TaskDetailProps) {
           </div>
         </div>
       </div>
+
+      {/* Not isolated: the agent edits the user's own checkout */}
+      {!task.worktree_path && (
+        <div className="px-6 py-2 border-b border-white/[0.05] shrink-0">
+          <WorktreeWarning
+            compact
+            issue={(() => {
+              try { return task.metadata ? JSON.parse(task.metadata).worktreeIssue : undefined } catch { return undefined }
+            })()}
+          />
+        </div>
+      )}
 
       {/* Merge error */}
       {mergeState === 'error' && mergeError && (

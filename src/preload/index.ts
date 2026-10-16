@@ -83,6 +83,9 @@ const api = {
       ipcRenderer.invoke('git:getChanges', { cwd, branch, startCommit }),
     getFileDiff: (cwd: string, filePath: string, startCommit?: string) =>
       ipcRenderer.invoke('git:getFileDiff', { cwd, filePath, startCommit }),
+    /** null when tasks can get their own worktree, otherwise the reason they cannot. */
+    worktreeSupport: (cwd: string): Promise<'not-git' | 'no-commits' | null> =>
+      ipcRenderer.invoke('git:worktreeSupport', cwd),
     getBranches: (cwd: string): Promise<string[]> =>
       ipcRenderer.invoke('git:getBranches', cwd),
     getWorkingStatus: (cwd: string) =>
