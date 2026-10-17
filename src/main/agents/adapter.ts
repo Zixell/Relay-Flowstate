@@ -174,6 +174,11 @@ export interface ChatSupport {
   capabilities: AgentCapabilities
   createSession: (ctx: SessionContext) => AgentSession
   history?: SessionHistory
+  /**
+   * What the composer needs before the first message (commands, context
+   * fill), read without running a turn. Used when no session is live.
+   */
+  peek?: (ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model'>) => Promise<{ commands?: SlashCommandInfo[]; usage?: SessionUsage }>
 }
 
 /** Small event emitter shared by adapters. */

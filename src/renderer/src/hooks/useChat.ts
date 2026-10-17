@@ -76,6 +76,19 @@ export function useChat(taskId: string): ChatHandle {
       pending.current = null
       setState(s)
       setLoading(false)
+
+      // No live session yet (imported chat, app restart): ask the agent for
+      // commands and context without running a turn. Live events win.
+      if (!liveState.active && (!s.commands.length || !s.usage)) {
+        window.api.chat.peek(taskId).then((peek: { commands?: SlashCommandInfo[]; usage?: SessionUsage | null }) => {
+          if (cancelled) return
+          setState((cur) => ({
+            ...cur,
+            commands: cur.commands.length ? cur.commands : peek.commands ?? [],
+            usage: cur.usage ?? peek.usage ?? null
+          }))
+        })
+      }
     })
     void refreshTurns()
 

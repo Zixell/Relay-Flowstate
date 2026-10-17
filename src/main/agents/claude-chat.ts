@@ -10,6 +10,8 @@ import type {
   RateLimitInfo,
   SessionContext,
   SessionHistory,
+  SessionUsage,
+  SlashCommandInfo,
   ToolKind,
   TurnEndReason,
   TurnUsage,
@@ -387,10 +389,7 @@ class ClaudeSession implements AgentSession {
   private limits = new Map<string, RateLimitInfo>()
 
   private emitCommands(commands: { name: string; description?: string; argumentHint?: string }[]): void {
-    this.emit({
-      type: 'commands.updated',
-      commands: commands.map((c) => ({ name: c.name.replace(/^\//, ''), description: c.description || undefined, hint: c.argumentHint || undefined }))
-    })
+    this.emit({ type: 'commands.updated', commands: toCommands(commands) })
   }
 
   private finishTurn(reason: TurnEndReason, usage?: TurnUsage): void {
@@ -570,6 +569,45 @@ const claudeHistory: SessionHistory = {
   }
 }
 
+function toCommands(commands: { name: string; description?: string; argumentHint?: string }[]): SlashCommandInfo[] {
+  return commands.map((c) => ({ name: c.name.replace(/^\//, ''), description: c.description || undefined, hint: c.argumentHint || undefined }))
+}
+
+/**
+ * Opens the session without sending anything: the CLI loads the transcript and
+ * settings, which is enough to list commands and measure the context. No
+ * request reaches the model.
+ */
+async function peek(ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model'>): Promise<{ commands?: SlashCommandInfo[]; usage?: SessionUsage }> {
+  const { query } = await loadSdk()
+  const input = new InputQueue()
+  const q = query({
+    prompt: input,
+    options: {
+      cwd: ctx.cwd,
+      resume: ctx.resumeSessionId,
+      model: ctx.model && ctx.model !== 'default' ? ctx.model : undefined,
+      settingSources: ['user', 'project', 'local'],
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      pathToClaudeCodeExecutable: resolveExecutable('claude') ?? undefined,
+      stderr: (data) => console.warn('[relay][claude peek]', data.trimEnd())
+    }
+  })
+  try {
+    const [commands, context] = await Promise.all([
+      q.supportedCommands(),
+      q.getContextUsage({ detail: 'summary' }).catch(() => null)
+    ])
+    return {
+      commands: toCommands(commands),
+      usage: context ? { contextUsed: context.totalTokens, contextSize: context.maxTokens } : undefined
+    }
+  } finally {
+    input.close()
+    q.close()
+  }
+}
+
 export const claudeChat: ChatSupport = {
   capabilities: {
     resume: true,
@@ -581,5 +619,6 @@ export const claudeChat: ChatSupport = {
     modes: MODES
   },
   createSession: (ctx) => new ClaudeSession(ctx),
-  history: claudeHistory
+  history: claudeHistory,
+  peek
 }

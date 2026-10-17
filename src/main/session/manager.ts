@@ -1,4 +1,6 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
+import { readFileSync, writeFileSync } from 'fs'
+import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { AgentEvent, AgentSession, PlanItem, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
 import { getAgent, getBoolSetting } from '../agents'
@@ -67,8 +69,35 @@ export interface ChatEventPayload {
 const MAX_TOOL_OUTPUT = 20_000
 
 const live = new Map<string, LiveSession>()
-/** Slash commands last reported per agent, so the composer can offer them before a session starts. */
+/**
+ * Slash commands last reported per agent, so the composer can offer them
+ * before a session starts. Kept on disk across restarts.
+ */
 const commandsByAgent = new Map<string, SlashCommandInfo[]>()
+let commandsLoaded = false
+const commandsFile = (): string => join(app.getPath('userData'), 'agent-commands.json')
+
+function agentCommands(agentId: string): SlashCommandInfo[] {
+  if (!commandsLoaded) {
+    commandsLoaded = true
+    try {
+      for (const [id, list] of Object.entries(JSON.parse(readFileSync(commandsFile(), 'utf8')))) commandsByAgent.set(id, list as SlashCommandInfo[])
+    } catch {
+      // first run
+    }
+  }
+  return commandsByAgent.get(agentId) ?? []
+}
+
+function rememberCommands(agentId: string, commands: SlashCommandInfo[]): void {
+  agentCommands(agentId)
+  commandsByAgent.set(agentId, commands)
+  try {
+    writeFileSync(commandsFile(), JSON.stringify(Object.fromEntries(commandsByAgent)))
+  } catch (err) {
+    console.warn('[relay] could not save agent commands:', err)
+  }
+}
 /** Usage last reported per task (context, cost, limits); kept after the session ends. */
 const usageByTask = new Map<string, SessionUsage>()
 
@@ -121,7 +150,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     turnId: null,
     streaming: new Map(),
     plan: storedPlan(task),
-    commands: commandsByAgent.get(task.process_type) ?? [],
+    commands: agentCommands(task.process_type),
     lastText: '',
     unsubscribe: () => {}
   }
@@ -240,7 +269,7 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'commands.updated': {
       s.commands = e.commands
-      commandsByAgent.set(loadTask(taskId).process_type, e.commands)
+      rememberCommands(loadTask(taskId).process_type, e.commands)
       break
     }
 
@@ -430,9 +459,42 @@ export function getLiveState(taskId: string): LiveState {
     inTurn: false,
     streaming: {},
     plan: task ? storedPlan(task) : [],
-    commands: task ? commandsByAgent.get(task.process_type) ?? [] : [],
+    commands: task ? agentCommands(task.process_type) : [],
     usage
   }
+}
+
+const peeked = new Map<string, Promise<void>>()
+
+/**
+ * Fills commands and context for a chat that has no live session (just
+ * imported, or after a restart) by asking the agent without running a turn.
+ * Once per task per app run.
+ */
+export function peekTask(taskId: string): Promise<LiveState> {
+  if (live.has(taskId)) return Promise.resolve(getLiveState(taskId))
+  let pending = peeked.get(taskId)
+  if (!pending) {
+    pending = (async () => {
+      const task = loadTask(taskId)
+      const peek = getAgent(task.process_type).chat?.peek
+      if (peek) {
+        try {
+          const r = await peek({
+            cwd: task.worktree_path || task.project_path,
+            resumeSessionId: task.agent_session_id ?? undefined,
+            model: task.model ?? undefined
+          })
+          if (r.commands?.length) rememberCommands(task.process_type, r.commands)
+          if (r.usage && !usageByTask.has(taskId)) usageByTask.set(taskId, r.usage)
+        } catch (err) {
+          console.warn('[relay] could not read session details:', err)
+        }
+      }
+    })()
+    peeked.set(taskId, pending)
+  }
+  return pending.then(() => getLiveState(taskId))
 }
 
 export async function disposeSession(taskId: string): Promise<void> {

@@ -108,6 +108,8 @@ const api = {
       ipcRenderer.invoke('chat:send', { taskId, input }),
     interrupt: (taskId: string) => ipcRenderer.invoke('chat:interrupt', taskId),
     fork: (taskId: string, turnId: string) => ipcRenderer.invoke('chat:fork', { taskId, turnId }),
+    /** Commands and context for a chat without a live session, read without running a turn. */
+    peek: (taskId: string) => ipcRenderer.invoke('chat:peek', taskId),
     /** A notification was clicked: the main process asks to show this task. */
     onSelectTask: (callback: (taskId: string) => void) => {
       const listener = (_: Electron.IpcRendererEvent, taskId: string) => callback(taskId)

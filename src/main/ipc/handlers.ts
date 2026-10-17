@@ -59,6 +59,7 @@ import {
   setMode as setChatMode,
   setModel as setChatModel,
   getLiveState,
+  peekTask,
   disposeSession
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
@@ -398,6 +399,7 @@ export function registerIpcHandlers(): void {
       getMessages(taskId, { beforeSeq, limit })
   )
   ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
+  ipcMain.handle('chat:peek', (_, taskId: string) => peekTask(taskId))
   ipcMain.handle('chat:attachment', (_, { taskId, id }: { taskId: string; id: string }) => readAttachment(taskId, id))
 
   // --- Sidecar console (plain shell in the task's worktree, no agent logic) ---

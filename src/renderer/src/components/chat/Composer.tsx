@@ -110,7 +110,7 @@ export function Composer({ inTurn, capabilities, model, mode, commands = [], onS
   return (
     <div className="relative rounded-2xl border border-white/[0.09] bg-[#111] focus-within:border-white/20 transition-colors">
       {menuOpen && (
-        <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border border-white/[0.09] bg-[#141414] shadow-2xl shadow-black/50 py-1 z-20 max-h-72 overflow-y-auto">
+        <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border border-white/[0.09] bg-[#141414] shadow-2xl shadow-black/50 py-1 z-20 max-h-72 overflow-y-auto overflow-x-hidden">
           {matches.map((c, i) => (
             <button
               key={c.name}
@@ -122,7 +122,7 @@ export function Composer({ inTurn, capabilities, model, mode, commands = [], onS
               className={cn('w-full flex items-baseline gap-2 px-3 py-1.5 text-left', i === menuIndex && 'bg-white/[0.06]')}
             >
               <span className="font-mono text-[12px] text-zinc-100 shrink-0">/{c.name}</span>
-              {c.hint && <span className="font-mono text-[11px] text-zinc-600 shrink-0">{c.hint}</span>}
+              {c.hint && <span className="font-mono text-[11px] text-zinc-600 truncate max-w-[35%] shrink-0">{c.hint}</span>}
               {c.description && <span className="text-[11.5px] text-zinc-500 truncate">{c.description}</span>}
             </button>
           ))}
