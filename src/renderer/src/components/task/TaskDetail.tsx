@@ -21,7 +21,6 @@ import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/
 import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { Terminal } from './Terminal'
 import { SidecarConsole } from './SidecarConsole'
 import { ChatView } from '../chat/ChatView'
 import { WorktreeWarning } from './WorktreeWarning'
@@ -35,11 +34,10 @@ interface TaskDetailProps {
   task: Task
 }
 
-type DetailTab = 'chat' | 'console' | 'terminal' | 'timeline' | 'files' | 'notes' | 'summary'
+type DetailTab = 'chat' | 'console' | 'timeline' | 'files' | 'notes' | 'summary'
 
 export function TaskDetail({ task }: TaskDetailProps) {
-  const isChat = task.transport === 'chat'
-  const [activeTab, setActiveTab] = useState<DetailTab>(isChat ? 'chat' : 'terminal')
+  const [activeTab, setActiveTab] = useState<DetailTab>('chat')
   const [notes, setNotes] = useState(task.notes ?? '')
   const [notesSaved, setNotesSaved] = useState(false)
   const [summaries, setSummaries] = useState<SessionSummaryEntry[]>([])
@@ -50,10 +48,10 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const updateTask = useAppStore((s) => s.updateTask)
   const agents = useAppStore((s) => s.agents)
 
-  // A different task may use a different transport; reset the tab when it changes.
+  // Every task opens on its conversation.
   useEffect(() => {
-    setActiveTab(isChat ? 'chat' : 'terminal')
-  }, [task.id, isChat])
+    setActiveTab('chat')
+  }, [task.id])
 
   // Sync notes when task changes
   useEffect(() => {
@@ -83,10 +81,10 @@ export function TaskDetail({ task }: TaskDetailProps) {
     }).catch(() => {})
   }, [task.id, task.project_path, task.worktree_path])
 
-  // Live summary updates from PTY — receives full array JSON
+  // Live summary updates — receives the full array as JSON
   useEffect(() => {
-    if (!isElectron || !window.api.pty.onSummary) return
-    const unsub = window.api.pty.onSummary(task.id, (allSummariesJson) => {
+    if (!isElectron || !window.api.tasks.onSummary) return
+    const unsub = window.api.tasks.onSummary(task.id, (allSummariesJson) => {
       try {
         const list: SessionSummaryEntry[] = JSON.parse(allSummariesJson)
         if (Array.isArray(list)) setSummaries(list)
@@ -120,15 +118,10 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const handleStop = useCallback(async () => {
     if (!isElectron) return
     setIsStopping(true)
-    if (isChat) {
-      // The status follows from the agent's turn.completed (interrupted) event.
-      await window.api.chat.interrupt(task.id)
-    } else {
-      await window.api.pty.kill(task.id)
-      updateTask(task.id, { status: 'paused', updated_at: Math.floor(Date.now() / 1000) })
-    }
+    // The status follows from the agent's turn.completed (interrupted) event.
+    await window.api.chat.interrupt(task.id)
     setIsStopping(false)
-  }, [task.id, isChat, updateTask])
+  }, [task.id])
 
   const handleSaveNotes = useCallback(async () => {
     if (isElectron) {
@@ -219,7 +212,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
                   variant="outline"
                   size="sm"
                   className="gap-1.5 h-8 text-xs border-amber-500/20 text-amber-400 hover:bg-amber-500/10"
-                  onClick={() => setActiveTab(isChat ? 'chat' : 'terminal')}
+                  onClick={() => setActiveTab('chat')}
                 >
                   <MessageSquare className="w-3 h-3" />
                   Respond to Agent
@@ -284,26 +277,12 @@ export function TaskDetail({ task }: TaskDetailProps) {
         </div>
       )}
 
-      {/* Context summary (prompt) — the chat shows it as the first message */}
-      {!isChat && <div className="px-6 py-3 border-b border-white/[0.05] bg-white/[0.01] shrink-0">
-        <div className="flex items-start gap-2">
-          <div className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider mt-0.5 w-12 shrink-0">
-            Prompt
-          </div>
-          <p className="text-xs text-zinc-400 leading-relaxed line-clamp-2">{task.prompt}</p>
-        </div>
-      </div>}
-
       {/* Tabs */}
       <div className="flex items-center gap-0 px-6 border-b border-white/[0.06] bg-[#0d0d0d] shrink-0">
         {(
           [
-            ...(isChat
-              ? [
-                  { id: 'chat', label: 'Chat' },
-                  { id: 'console', label: 'Console' }
-                ]
-              : [{ id: 'terminal', label: 'Terminal' }]),
+            { id: 'chat', label: 'Chat' },
+            { id: 'console', label: 'Console' },
             { id: 'timeline', label: 'Timeline' },
             { id: 'files', label: `Files (${task.changed_files_count})` },
             { id: 'notes', label: 'Notes' },
@@ -332,12 +311,6 @@ export function TaskDetail({ task }: TaskDetailProps) {
         {activeTab === 'console' && (
           <div className="h-full p-5">
             <SidecarConsole task={task} />
-          </div>
-        )}
-
-        {activeTab === 'terminal' && (
-          <div className="h-full p-5">
-            <Terminal task={task} className="h-full" />
           </div>
         )}
 

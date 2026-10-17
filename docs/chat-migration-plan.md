@@ -68,7 +68,11 @@ Users on a Claude Pro/Max login can still run `claude` there by hand.
   - notifications while the app is in the background (finished / failed / needs approval), click opens the task, dock badge = tasks waiting; setting `RELAY_NOTIFICATIONS`
   - fork from a turn (`src/main/session/fork.ts`): new worktree restored to the turn's snapshot + agent session forked at the turn's checkpoint (Claude message uuid, Codex `lastTurnId`; ACP only from the last turn)
   - attachments and the sidecar console were done earlier
-- [ ] 7. Remove legacy PTY agent path (keep node-pty only for the sidecar console), convert old Claude/Codex tasks (same session id), update README
+- [x] 7. Legacy terminal path removed
+  - deleted: `pty/manager.ts` (agent PTY sessions, inactivity status, status locks), `agents/launcher.ts`, `agents/session-watcher.ts`, `Terminal.tsx`, `pty:*` IPC, the Chat mode setting, Aider / generic CLI stubs; node-pty stays for the sidecar console
+  - `AgentDefinition.chat` is required; agents keep `headless` for summaries
+  - old terminal tasks become chat tasks on startup (`convertLegacyTasks`); their history is read from the agent's session on first open (`restoreLegacyHistory`), or the original prompt starts the chat
+  - README rewritten; `npm run typecheck` passes without errors
 
 ## Notes
 

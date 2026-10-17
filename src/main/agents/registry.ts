@@ -3,7 +3,6 @@ import { getSetting } from '../settings'
 import type { AgentDefinition, AgentDescriptor, AgentId } from './types'
 import { claudeCodeAgent } from './claude-code'
 import { codexAgent } from './codex'
-import { aiderAgent, genericAgent } from './others'
 import { geminiAgent, openCodeAgent, gooseAgent } from './acp-agents'
 
 /**
@@ -15,15 +14,31 @@ const AGENTS: AgentDefinition[] = [
   codexAgent,
   geminiAgent,
   openCodeAgent,
-  gooseAgent,
-  aiderAgent,
-  genericAgent
+  gooseAgent
 ]
 
 const byId = new Map<AgentId, AgentDefinition>(AGENTS.map((a) => [a.id, a]))
 
-/** Fallback used when a task references an agent that no longer exists. */
-export const FALLBACK_AGENT = genericAgent
+/**
+ * Stands in for an agent a task references but the app no longer knows
+ * (e.g. one removed from the catalog): the task opens, but cannot run.
+ */
+export const FALLBACK_AGENT: AgentDefinition = {
+  id: 'unknown',
+  label: 'Unknown agent',
+  description: 'This agent is not supported any more',
+  color: '#6b7280',
+  enabled: false,
+  binary: 'false',
+  versionArgs: [],
+  settings: [],
+  chat: {
+    capabilities: { resume: false, interrupt: false, permissions: false, images: false },
+    createSession: () => {
+      throw new Error('This task uses an agent that is not supported any more')
+    }
+  }
+}
 
 export function listAgents(): AgentDefinition[] {
   return AGENTS
@@ -82,9 +97,8 @@ export function describeAgents(): AgentDescriptor[] {
     color: a.color,
     enabled: a.enabled,
     available: a.enabled ? isAgentAvailable(a.id) : false,
-    supportsResume: typeof a.buildResumeCommand === 'function',
     supportsSummaries: Boolean(a.headless),
-    chat: a.chat?.capabilities,
+    chat: a.chat.capabilities,
     settings: a.settings
   }))
 }

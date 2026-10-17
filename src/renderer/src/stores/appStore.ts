@@ -11,7 +11,6 @@ const FALLBACK_AGENTS: AgentDescriptor[] = ['claude-code', 'codex'].map((id) => 
   color: PROCESS_COLORS[id],
   enabled: true,
   available: false,
-  supportsResume: true,
   supportsSummaries: true,
   settings: []
 }))

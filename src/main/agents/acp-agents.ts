@@ -2,8 +2,8 @@ import type { AgentDefinition } from './types'
 import { createAcpChat } from './acp-chat'
 
 /**
- * Agents integrated through the Agent Client Protocol. In chat mode they run
- * as ACP servers; the terminal launch is the plain interactive CLI.
+ * Agents integrated through the Agent Client Protocol: each runs as an ACP
+ * server over stdio.
  */
 
 export const geminiAgent: AgentDefinition = {
@@ -16,10 +16,6 @@ export const geminiAgent: AgentDefinition = {
   binary: 'gemini',
   versionArgs: ['--version'],
 
-  tracked: true,
-  promptDelivery: 'arg',
-  // `-i` starts the interactive UI already working on the prompt.
-  buildLaunchCommand: ({ prompt }) => ({ cmd: 'gemini', args: prompt ? ['-i', prompt] : [] }),
 
   chat: createAcpChat({
     id: 'gemini',
@@ -41,9 +37,6 @@ export const openCodeAgent: AgentDefinition = {
   binary: 'opencode',
   versionArgs: ['--version'],
 
-  tracked: true,
-  promptDelivery: 'arg',
-  buildLaunchCommand: ({ prompt }) => ({ cmd: 'opencode', args: prompt ? ['--prompt', prompt] : [] }),
 
   chat: createAcpChat({
     id: 'opencode',
@@ -65,9 +58,6 @@ export const gooseAgent: AgentDefinition = {
   binary: 'goose',
   versionArgs: ['--version'],
 
-  tracked: true,
-  promptDelivery: 'input',
-  buildLaunchCommand: () => ({ cmd: 'goose', args: ['session'] }),
 
   chat: createAcpChat({
     id: 'goose',

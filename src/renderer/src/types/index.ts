@@ -23,7 +23,6 @@ export interface AgentDescriptor {
   color: string
   enabled: boolean
   available: boolean
-  supportsResume: boolean
   supportsSummaries: boolean
   /** Present when the agent can run in chat mode. */
   chat?: ChatCapabilities
@@ -71,8 +70,7 @@ export interface Task {
   metadata?: string
   /** The agent's own session handle, used to resume the conversation. */
   agent_session_id?: string
-  /** 'chat' = structured agent session, 'pty' = legacy terminal task. */
-  transport?: 'pty' | 'chat'
+  transport?: 'chat'
   model?: string | null
   mode?: string | null
   /** Chat tasks: the agent's latest reply, for the dashboard card. */

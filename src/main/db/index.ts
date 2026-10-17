@@ -217,7 +217,7 @@ export function insertTask(task: {
   branch?: string
   worktree_path?: string
   metadata?: string
-  transport?: 'pty' | 'chat'
+  transport?: 'chat'
   model?: string
   mode?: string
 }) {
@@ -230,7 +230,7 @@ export function insertTask(task: {
     branch: task.branch ?? null,
     worktree_path: task.worktree_path ?? null,
     metadata: task.metadata ?? '{}',
-    transport: task.transport ?? 'pty',
+    transport: task.transport ?? 'chat',
     model: task.model ?? null,
     mode: task.mode ?? null
   })
@@ -325,11 +325,30 @@ export function resetRunningTasks(): void {
   db.prepare(`UPDATE tasks SET status = 'paused', updated_at = unixepoch() WHERE status = 'running'`).run()
 }
 
-/** Return IDs of all tasks currently in completed or waiting state (used to pre-populate status locks). */
-export function getLockedTaskIds(): string[] {
-  if (!db) return []
-  const rows = db.prepare(`SELECT id FROM tasks WHERE status IN ('completed', 'waiting', 'paused', 'failed')`).all() as Array<{ id: string }>
-  return rows.map((r) => r.id)
+/**
+ * Turns tasks from the terminal era into chat tasks. Their transcript is read
+ * from the agent's own session the first time the chat is opened
+ * (`legacyHistory` in metadata), so startup stays fast.
+ */
+export function convertLegacyTasks(): number {
+  if (!db) return 0
+  const rows = db.prepare(`SELECT id, metadata FROM tasks WHERE transport = 'pty'`).all() as { id: string; metadata: string | null }[]
+  const update = db.prepare(`UPDATE tasks SET transport = 'chat', metadata = ? WHERE id = ?`)
+  for (const row of rows) {
+    let meta: Record<string, unknown> = {}
+    try {
+      meta = row.metadata ? JSON.parse(row.metadata) : {}
+    } catch {
+      // keep going with a fresh object
+    }
+    update.run(JSON.stringify({ ...meta, legacyHistory: true }), row.id)
+  }
+  return rows.length
+}
+
+export function updateTaskMetadata(id: string, metadata: Record<string, unknown>): void {
+  if (!db) return
+  db.prepare('UPDATE tasks SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), id)
 }
 
 // --- Event queries ---
@@ -352,20 +371,6 @@ export function insertTaskEvent(event: {
     'INSERT INTO task_events (id, task_id, type, content, metadata) VALUES (@id, @task_id, @type, @content, @metadata)'
   ).run({ ...event, content: event.content ?? null, metadata: event.metadata ?? null })
 }
-
-// --- Terminal logs ---
-export function getTerminalLogs(taskId: string) {
-  if (!db) return []
-  return db
-    .prepare('SELECT * FROM terminal_logs WHERE task_id = ? ORDER BY id ASC')
-    .all(taskId)
-}
-
-export function insertTerminalLog(taskId: string, data: string) {
-  if (!db) return
-  db.prepare('INSERT INTO terminal_logs (task_id, data) VALUES (?, ?)').run(taskId, data)
-}
-
 
 // --- Chat: turns ---
 export interface TurnRow {

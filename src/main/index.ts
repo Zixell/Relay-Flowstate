@@ -2,11 +2,10 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { net } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { initDatabase, resetRunningTasks, resetRunningTurns, getLockedTaskIds } from './db'
+import { initDatabase, resetRunningTasks, resetRunningTurns, convertLegacyTasks } from './db'
 import { disposeAllSessions } from './session/manager'
 import { closeAllConsoles } from './console/manager'
 import { registerIpcHandlers } from './ipc/handlers'
-import { killAllSessions, initLockedStatuses } from './pty/manager'
 import { loadSettings } from './settings'
 
 // Lets tests and parallel dev instances run against their own database and worktrees.
@@ -100,9 +99,10 @@ app.whenReady().then(() => {
 
   try {
     initDatabase()
+    const converted = convertLegacyTasks()
+    if (converted) console.log(`[relay] converted ${converted} terminal task(s) to chat`)
     resetRunningTasks()
     resetRunningTurns()
-    initLockedStatuses(getLockedTaskIds())
     loadSettings()
   } catch (err) {
     console.warn('[relay] DB init failed (native bindings not built?):', err)
@@ -117,7 +117,6 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
-  killAllSessions()
   void disposeAllSessions()
   closeAllConsoles()
 })

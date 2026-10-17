@@ -28,6 +28,14 @@ const api = {
   tasks: {
     getAll: () => ipcRenderer.invoke('tasks:getAll'),
     getById: (id: string) => ipcRenderer.invoke('tasks:getById', id),
+    /** The task's summaries, as a JSON array, whenever a new one is written. */
+    onSummary: (taskId: string, callback: (summariesJson: string) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, summaries: string) => callback(summaries)
+      ipcRenderer.on(`task:summary:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`task:summary:${taskId}`, listener)
+      }
+    },
     create: (data: {
       projectId: string
       title: string
@@ -49,7 +57,6 @@ const api = {
     updateSummary: (data: { id: string; summary: string }) =>
       ipcRenderer.invoke('tasks:updateSummary', data),
     getEvents: (taskId: string) => ipcRenderer.invoke('tasks:getEvents', taskId),
-    getLogs: (taskId: string) => ipcRenderer.invoke('tasks:getLogs', taskId),
     getSummaries: (taskId: string) => ipcRenderer.invoke('tasks:getSummaries', taskId),
     onEvent: (taskId: string, callback: (event: unknown) => void) => {
       const listener = (_: Electron.IpcRendererEvent, event: unknown) => callback(event)
@@ -182,45 +189,8 @@ const api = {
     diff: (taskId: string, turnId: string, path?: string): Promise<string> =>
       ipcRenderer.invoke('turns:diff', { taskId, turnId, path }),
     revert: (taskId: string, turnId: string) => ipcRenderer.invoke('turns:revert', { taskId, turnId })
-  },
-
-  // PTY
-  pty: {
-    write: (taskId: string, data: string) => ipcRenderer.invoke('pty:write', { taskId, data }),
-    resize: (taskId: string, cols: number, rows: number) =>
-      ipcRenderer.invoke('pty:resize', { taskId, cols, rows }),
-    kill: (taskId: string) => ipcRenderer.invoke('pty:kill', taskId),
-    restart: (taskId: string, cols?: number, rows?: number) =>
-      ipcRenderer.invoke('pty:restart', { taskId, cols, rows }),
-    sessions: () => ipcRenderer.invoke('pty:sessions'),
-    onData: (taskId: string, callback: (data: string) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, data: string) => callback(data)
-      ipcRenderer.on(`pty:data:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`pty:data:${taskId}`, listener)
-    },
-    onExit: (taskId: string, callback: (exitCode: number) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, exitCode: number) => callback(exitCode)
-      ipcRenderer.on(`pty:exit:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`pty:exit:${taskId}`, listener)
-    },
-    onAgentExit: (taskId: string, callback: (status: string) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, status: string) => callback(status)
-      ipcRenderer.on(`pty:agent-exit:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`pty:agent-exit:${taskId}`, listener)
-    },
-    onStatusChange: (taskId: string, callback: (status: string) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, status: string) => callback(status)
-      ipcRenderer.on(`pty:status:${taskId}`, listener)
-      return () => ipcRenderer.removeListener(`pty:status:${taskId}`, listener)
-    },
-    onSummary: (taskId: string, callback: (summary: string) => void) => {
-      const listener = (_: Electron.IpcRendererEvent, summary: string) => callback(summary)
-      ipcRenderer.on(`pty:summary:${taskId}`, listener)
-      return () => {
-        ipcRenderer.removeListener(`pty:summary:${taskId}`, listener)
-      }
-    }
   }
+
 }
 
 contextBridge.exposeInMainWorld('api', api)

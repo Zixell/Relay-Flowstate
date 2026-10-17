@@ -14,11 +14,10 @@ import {
   Trash2,
   ShieldAlert
 } from 'lucide-react'
-import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
+import { cn, formatDuration, formatRelativeTime } from '../../lib/utils'
 import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
-import { MOCK_TERMINAL_LOGS } from '../../lib/mockData'
 import { useAppStore } from '../../stores/appStore'
 import { ContextMenu, type ContextMenuState } from '../ui/context-menu'
 
@@ -46,24 +45,15 @@ export function TaskCard({ task }: TaskCardProps) {
     deleteTask(task.id)
   }, [task.id, deleteTask])
 
-  const isChat = task.transport === 'chat'
   const approval = useMemo(() => {
-    if (!isChat || !task.pending_permission) return null
+    if (!task.pending_permission) return null
     try {
       return (JSON.parse(task.pending_permission) as { title?: string }).title ?? 'Permission request'
     } catch {
       return 'Permission request'
     }
-  }, [isChat, task.pending_permission])
-  const lastMessage = isChat ? plainPreview(task.last_message) : ''
-
-  const logPreview = isChat ? '' : MOCK_TERMINAL_LOGS[task.id]?.slice(-300) ?? ''
-  const logLines = logPreview
-    .replace(/\x1b\[[0-9;]*m/g, '') // strip ansi
-    .trim()
-    .split('\n')
-    .slice(-3)
-    .join('\n')
+  }, [task.pending_permission])
+  const lastMessage = plainPreview(task.last_message)
 
   return (
     <>
@@ -177,15 +167,6 @@ export function TaskCard({ task }: TaskCardProps) {
         {/* Agent's latest reply */}
         {lastMessage && !approval && (
           <p className="text-[11.5px] text-zinc-400 leading-relaxed line-clamp-2 mb-3">{lastMessage}</p>
-        )}
-
-        {/* Terminal preview */}
-        {logLines && (
-          <div className="rounded-lg bg-black/40 border border-white/[0.04] px-3 py-2 mb-3 overflow-hidden">
-            <pre className="text-[10px] font-mono text-zinc-500 leading-relaxed whitespace-pre-wrap line-clamp-3">
-              {logLines}
-            </pre>
-          </div>
         )}
 
         {/* Action row */}

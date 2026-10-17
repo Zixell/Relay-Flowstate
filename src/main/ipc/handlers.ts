@@ -5,7 +5,6 @@ import {
   getAllTasks,
   getTaskById,
   getTaskEvents,
-  getTerminalLogs,
   getTaskSummaries,
   upsertProject,
   deleteProject,
@@ -13,28 +12,10 @@ import {
   insertTaskEvent,
   updateTaskStatus,
   updateTaskNotes,
-  updateTaskAgentSessionId,
   appendTaskSummary,
   deleteTask
 } from '../db'
-import {
-  createPtySession,
-  writeToPty,
-  resizePty,
-  killPtySession,
-  getActiveSessions,
-  unlockTaskStatus
-} from '../pty/manager'
-import {
-  getAgent,
-  describeAgents,
-  getBoolSetting,
-  isAgentAvailable,
-  resolveLaunch,
-  watchForNewSession,
-  type AgentDefinition,
-  type ResumeMode
-} from '../agents'
+import { getAgent, describeAgents, isAgentAvailable } from '../agents'
 import {
   getGitChanges,
   getFileDiff,
@@ -64,63 +45,9 @@ import {
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
-import { listImportableSessions, importSession, type ImportRequest } from '../session/import'
+import { listImportableSessions, importSession, restoreLegacyHistory, type ImportRequest } from '../session/import'
 import { forkTask } from '../session/fork'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
-
-/** Setting that routes chat-capable agents to chat mode instead of a terminal. */
-const CHAT_MODE = 'RELAY_CHAT_MODE'
-
-// Per-task input buffer to reconstruct full lines from character-by-character PTY writes
-const inputBuffers = new Map<string, string>()
-
-/**
- * Launches — or resumes — a task's agent session.
- *
- * All agent-specific knowledge (flags, resume syntax, how the prompt is
- * delivered, where session ids come from) lives in the agent definition, so
- * this function is identical for every agent.
- */
-function startAgentSession(params: {
-  taskId: string
-  agent: AgentDefinition
-  cwd: string
-  prompt?: string
-  resumeSessionId?: string
-  /** True when restarting an existing task (see `BuildLaunchOptions.allowContinue`). */
-  allowContinue?: boolean
-  cols: number
-  rows: number
-}): { resumed: boolean; resumeMode: ResumeMode } {
-  const { taskId, agent, cwd, prompt, resumeSessionId, allowContinue, cols, rows } = params
-  const launch = resolveLaunch(agent, { cwd, prompt, resumeSessionId, allowContinue })
-
-  // Snapshot the agent's session directory BEFORE launch, then capture the id of
-  // the session file it creates — that's the handle used to resume later.
-  // Resuming by id keeps the original id, so this only runs when we don't have one.
-  if (launch.resumeMode !== 'session-id' && agent.sessionDiscovery && agent.buildResumeCommand) {
-    watchForNewSession(agent.sessionDiscovery, (sessionId) => {
-      updateTaskAgentSessionId(taskId, sessionId)
-    })
-  }
-
-  console.log(
-    `[relay] ${agent.label} session for task ${taskId.slice(0, 8)}: ` +
-      `${launch.resumeMode} — ${launch.command.cmd} ${launch.command.args.join(' ')}`
-  )
-
-  createPtySession({
-    taskId,
-    agentId: agent.id,
-    command: launch.command,
-    cwd,
-    typedPrompt: launch.typedPrompt,
-    cols,
-    rows
-  })
-
-  return { resumed: launch.resumed, resumeMode: launch.resumeMode }
-}
 
 function worktreeIssueText(issue?: string): string {
   if (issue === 'not-git') return 'the project is not a git repository'
@@ -153,7 +80,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:getById', (_, id: string) => getTaskById(id))
   ipcMain.handle(
     'tasks:create',
-    (_, { projectId, title, prompt, processType, branch, cwd, model, mode, cols = 80, rows = 24 }) => {
+    (_, { projectId, title, prompt, processType, branch, cwd, model, mode }) => {
+      // Fail before creating a worktree for an agent that cannot run.
+      const agent = getAgent(processType)
+      if (!agent.chat) throw new Error(`${agent.label} is not supported`)
       const id = randomUUID()
 
       // Create an isolated git worktree for this task so multiple tasks can run
@@ -187,8 +117,7 @@ export function registerIpcHandlers(): void {
       // Record the HEAD commit at session start so the Files tab can scope the diff
       const startCommit = effectiveCwd ? getCurrentCommit(effectiveCwd) : ''
 
-      const agent = getAgent(processType)
-      const transport = agent.chat && getBoolSetting(CHAT_MODE, true) ? 'chat' : 'pty'
+      const transport = 'chat'
 
       insertTask({
         id,
@@ -236,15 +165,11 @@ export function registerIpcHandlers(): void {
         })
       }
 
-      if (transport === 'chat') {
-        sendMessage(id, { text: prompt }).catch((err) => {
-          console.error('[relay] chat session failed to start:', err)
-          updateTaskStatus(id, 'failed')
-          BrowserWindow.getAllWindows()[0]?.webContents.send('task:status', { taskId: id, status: 'failed' })
-        })
-      } else {
-        startAgentSession({ taskId: id, agent, cwd: effectiveCwd, prompt, cols, rows })
-      }
+      sendMessage(id, { text: prompt }).catch((err) => {
+        console.error('[relay] chat session failed to start:', err)
+        updateTaskStatus(id, 'failed')
+        BrowserWindow.getAllWindows()[0]?.webContents.send('task:status', { taskId: id, status: 'failed' })
+      })
 
       return { id, projectId, title, prompt, processType, branch, status: 'running', transport }
     }
@@ -274,9 +199,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
-  ipcMain.handle('tasks:getLogs', (_, taskId: string) => getTerminalLogs(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {
-    killPtySession(id)
     closeConsole(id)
     await disposeSession(id)
     deleteAttachments(id)
@@ -284,78 +207,6 @@ export function registerIpcHandlers(): void {
     return { success: true }
   })
 
-  // --- PTY ---
-  ipcMain.handle('pty:write', (_, { taskId, data }: { taskId: string; data: string }) => {
-    // Buffer user input to detect complete prompts
-    const buf = inputBuffers.get(taskId) ?? ''
-
-    if (data === '\r' || data === '\n') {
-      // Enter pressed — unlock status so the next agent output resumes running tracking
-      unlockTaskStatus(taskId)
-      // Save buffered line as user_prompt event
-      const line = buf.trim()
-      if (line) {
-        const eventId = randomUUID()
-        const now = Math.floor(Date.now() / 1000)
-        insertTaskEvent({ id: eventId, task_id: taskId, type: 'user_prompt', content: line })
-        emitTaskEvent({ id: eventId, task_id: taskId, type: 'user_prompt', content: line, metadata: null, timestamp: now })
-      }
-      inputBuffers.set(taskId, '')
-    } else if (data === '\x7f' || data === '\b') {
-      // Backspace
-      inputBuffers.set(taskId, buf.slice(0, -1))
-    } else if (data === '\x03' || data === '\x1b') {
-      // Ctrl+C / Escape — discard buffer
-      inputBuffers.set(taskId, '')
-    } else if (!data.startsWith('\x1b')) {
-      // Regular printable characters (skip escape sequences like arrow keys)
-      inputBuffers.set(taskId, buf + data)
-    }
-
-    return writeToPty(taskId, data)
-  })
-  ipcMain.handle('pty:resize', (_, { taskId, cols, rows }) => resizePty(taskId, cols, rows))
-  ipcMain.handle('pty:kill', (_, taskId: string) => {
-    killPtySession(taskId)
-    const task = getTaskById(taskId) as { status: string } | null
-    if (task && task.status !== 'completed' && task.status !== 'failed') {
-      updateTaskStatus(taskId, 'paused')
-    }
-    return { success: true }
-  })
-  ipcMain.handle('pty:sessions', () => getActiveSessions())
-
-  ipcMain.handle('pty:restart', (_, { taskId, cols = 80, rows = 24 }: { taskId: string; cols?: number; rows?: number }) => {
-    const task = getTaskById(taskId) as {
-      process_type: string
-      project_path: string
-      worktree_path?: string
-      branch?: string
-      summary?: string
-      agent_session_id?: string
-    } | null
-    if (!task) throw new Error('Task not found')
-
-    killPtySession(taskId)
-
-    // Use the task's worktree if it exists, otherwise fall back to the project root
-    const sessionCwd = task.worktree_path || task.project_path
-
-    // A captured session id resumes that exact conversation; without one the
-    // agent may still continue the newest conversation in this working tree.
-    const { resumed, resumeMode } = startAgentSession({
-      taskId,
-      agent: getAgent(task.process_type),
-      cwd: sessionCwd,
-      resumeSessionId: task.agent_session_id || undefined,
-      allowContinue: true,
-      cols,
-      rows
-    })
-
-    updateTaskStatus(taskId, 'running')
-    return { success: true, resumed, resumeMode }
-  })
 
   // --- Worktree ---
   ipcMain.handle('worktree:remove', async (_, { taskId, force }: { taskId: string; force?: boolean }) => {
@@ -368,7 +219,6 @@ export function registerIpcHandlers(): void {
     if (!task.worktree_path) return { success: true, message: 'No worktree associated with this task' }
 
     // Stop any running session first
-    killPtySession(taskId)
     closeConsole(taskId)
     await disposeSession(taskId)
     deleteSnapshots(task.worktree_path, taskId)
@@ -395,8 +245,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('chat:setModel', (_, { taskId, model }: { taskId: string; model: string }) => setChatModel(taskId, model))
   ipcMain.handle(
     'chat:history',
-    (_, { taskId, beforeSeq, limit }: { taskId: string; beforeSeq?: number; limit?: number }): MessageRow[] =>
-      getMessages(taskId, { beforeSeq, limit })
+    async (_, { taskId, beforeSeq, limit }: { taskId: string; beforeSeq?: number; limit?: number }): Promise<MessageRow[]> => {
+      await restoreLegacyHistory(taskId)
+      return getMessages(taskId, { beforeSeq, limit })
+    }
   )
   ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
   ipcMain.handle('chat:peek', (_, taskId: string) => peekTask(taskId))
@@ -498,7 +350,7 @@ export function registerIpcHandlers(): void {
         const eventId = randomUUID()
         const content = JSON.stringify({ targetBranch, commit: result.commitHash })
         const now = Math.floor(Date.now() / 1000)
-        insertTaskEvent({ id: eventId, task_id: taskId, type: 'git_merge', content, metadata: null })
+        insertTaskEvent({ id: eventId, task_id: taskId, type: 'git_merge', content })
         emitTaskEvent({ id: eventId, task_id: taskId, type: 'git_merge', content, metadata: null, timestamp: now })
       }
       return result

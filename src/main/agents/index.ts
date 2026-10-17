@@ -1,14 +1,4 @@
-export type {
-  AgentId,
-  AgentCommand,
-  AgentDefinition,
-  AgentDescriptor,
-  AgentSettingDef,
-  HeadlessCommand,
-  LaunchContext,
-  PromptDelivery,
-  SessionDiscovery
-} from './types'
+export type { AgentId, AgentCommand, AgentDefinition, AgentDescriptor, AgentSettingDef, HeadlessCommand } from './types'
 
 export {
   listAgents,
@@ -20,6 +10,3 @@ export {
   FALLBACK_AGENT
 } from './registry'
 
-export { resolveLaunch, sanitizeArgForShell } from './launcher'
-export type { BuildLaunchOptions, ResolvedLaunch, ResumeMode } from './launcher'
-export { watchForNewSession, UUID_RE_SOURCE } from './session-watcher'

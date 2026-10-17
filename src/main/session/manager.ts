@@ -388,7 +388,7 @@ async function summarize(taskId: string, turnId: string): Promise<void> {
       existingSummaryText: existing?.text
     })
     appendTaskSummary(taskId, JSON.stringify(summary))
-    send(`pty:summary:${taskId}`, JSON.stringify([summary]))
+    send(`task:summary:${taskId}`, JSON.stringify([summary]))
   } catch (err) {
     console.warn('[relay] chat summary failed:', err)
   }

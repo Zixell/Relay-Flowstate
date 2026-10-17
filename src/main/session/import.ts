@@ -3,15 +3,17 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, join } from 'path'
 import { spawnSync } from 'child_process'
-import type { AgentEvent, ExternalSessionInfo, PlanItem } from '../agents/adapter'
+import type { AgentEvent, ExternalSessionInfo, HistoryEntry, PlanItem } from '../agents/adapter'
 import { describeAgents, getAgent, isAgentAvailable } from '../agents'
 import {
+  getMessages,
   getTaskById,
   getTaskSessionLinks,
   insertMessage,
   insertTask,
   insertTaskEvent,
   updateTaskAgentSessionId,
+  updateTaskMetadata,
   updateTaskPlan,
   updateTaskStatus,
   upsertProject
@@ -95,6 +97,78 @@ export async function listImportableSessions(): Promise<ImportableSession[]> {
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
+/** Stores a transcript read from an agent's session as the task's chat history. */
+function writeTranscript(taskId: string, entries: HistoryEntry[]): void {
+  const unfinished = new Set<string>()
+  let plan: PlanItem[] | null = null
+  const record = (event: AgentEvent): void => {
+    if (event.type === 'tool.started') unfinished.add(event.toolCallId)
+    if (event.type === 'tool.completed') unfinished.delete(event.toolCallId)
+    if (event.type === 'plan.updated') plan = event.items
+    persistEvent(taskId, null, event)
+  }
+  for (const entry of entries) {
+    if (entry.type === 'event') {
+      record(entry.event)
+      continue
+    }
+    const attachments = (entry.images ?? []).map((img) => saveAttachment(taskId, img))
+    insertMessage({ id: randomUUID(), task_id: taskId, role: 'user', kind: 'text', content: entry.text, attachments })
+  }
+  // Calls cut off in the original session (interrupted, crashed) have no result.
+  for (const toolCallId of unfinished) record({ type: 'tool.completed', toolCallId, status: 'error', output: 'No result was recorded' })
+  if (plan) updateTaskPlan(taskId, plan)
+}
+
+const restoring = new Map<string, Promise<void>>()
+
+/**
+ * A task from the terminal era gets its chat history from the agent's own
+ * session the first time it is opened. Without a session id (or if the agent
+ * cannot read it) the original prompt starts the chat instead.
+ */
+export function restoreLegacyHistory(taskId: string): Promise<void> {
+  const task = getTaskById(taskId) as {
+    process_type: string
+    prompt: string
+    project_path: string
+    worktree_path: string | null
+    agent_session_id: string | null
+    metadata: string | null
+  } | null
+  if (!task) return Promise.resolve()
+  let meta: Record<string, unknown> = {}
+  try {
+    meta = task.metadata ? JSON.parse(task.metadata) : {}
+  } catch {
+    // treat as empty
+  }
+  if (!meta.legacyHistory) return Promise.resolve()
+
+  let pending = restoring.get(taskId)
+  if (!pending) {
+    pending = (async () => {
+      const history = getAgent(task.process_type).chat?.history
+      let restored = false
+      if (history && task.agent_session_id && getMessages(taskId, { limit: 1 }).length === 0) {
+        try {
+          writeTranscript(taskId, await history.load(task.agent_session_id, task.worktree_path || task.project_path))
+          restored = getMessages(taskId, { limit: 1 }).length > 0
+        } catch (err) {
+          console.warn(`[relay] could not read the history of task ${taskId}:`, err)
+        }
+      }
+      if (!restored && getMessages(taskId, { limit: 1 }).length === 0 && task.prompt) {
+        insertMessage({ id: randomUUID(), task_id: taskId, role: 'user', kind: 'text', content: task.prompt })
+      }
+      delete meta.legacyHistory
+      updateTaskMetadata(taskId, meta)
+    })().finally(() => restoring.delete(taskId))
+    restoring.set(taskId, pending)
+  }
+  return pending
+}
+
 /** Creates a chat task from an external session, with its transcript, ready to continue. */
 export async function importSession(req: ImportRequest): Promise<unknown> {
   const agent = getAgent(req.agentId)
@@ -132,25 +206,7 @@ export async function importSession(req: ImportRequest): Promise<unknown> {
   })
   updateTaskAgentSessionId(taskId, resumeId)
 
-  const unfinished = new Set<string>()
-  let plan: PlanItem[] | null = null
-  const record = (event: AgentEvent): void => {
-    if (event.type === 'tool.started') unfinished.add(event.toolCallId)
-    if (event.type === 'tool.completed') unfinished.delete(event.toolCallId)
-    if (event.type === 'plan.updated') plan = event.items
-    persistEvent(taskId, null, event)
-  }
-  for (const entry of entries) {
-    if (entry.type === 'event') {
-      record(entry.event)
-      continue
-    }
-    const attachments = (entry.images ?? []).map((img) => saveAttachment(taskId, img))
-    insertMessage({ id: randomUUID(), task_id: taskId, role: 'user', kind: 'text', content: entry.text, attachments })
-  }
-  // Calls cut off in the original session (interrupted, crashed) have no result.
-  for (const toolCallId of unfinished) record({ type: 'tool.completed', toolCallId, status: 'error', output: 'No result was recorded' })
-  if (plan) updateTaskPlan(taskId, plan)
+  writeTranscript(taskId, entries)
 
   insertTaskEvent({
     id: randomUUID(),

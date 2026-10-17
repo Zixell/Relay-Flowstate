@@ -21,14 +21,6 @@ interface SettingsModalProps {
 /** App-wide settings, not tied to one agent. */
 const GENERAL_SETTINGS: AgentSettingDef[] = [
   {
-    key: 'RELAY_CHAT_MODE',
-    label: 'Chat mode',
-    description:
-      'New tasks for agents that support it open as a chat (structured session with permission prompts and per-turn history) instead of a terminal. Each chat task still has a plain Console tab in its worktree. Existing tasks keep their mode.',
-    type: 'boolean',
-    default: true
-  },
-  {
     key: 'RELAY_NOTIFICATIONS',
     label: 'Notifications',
     description: 'Show a system notification when a chat task finishes or needs approval while the app is in the background.',
@@ -213,7 +205,8 @@ function AgentStatusRow({ agent }: { agent: AgentDescriptor }) {
         <p className="text-[11px] text-zinc-500 mt-0.5">
           {agent.available
             ? [
-                agent.supportsResume ? 'sessions resume' : null,
+                agent.chat?.images ? 'images' : null,
+                agent.chat?.forkFromTurn ? 'fork from any turn' : null,
                 agent.supportsSummaries ? 'summaries' : null
               ].filter(Boolean).join(' · ') || 'ready'
             : `Install ${agent.label} to run tasks with it`}

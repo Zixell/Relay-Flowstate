@@ -1,4 +1,4 @@
-import { getDbSetting, setDbSetting, getAllSettings } from './db'
+import { setDbSetting, getAllSettings } from './db'
 
 const cache = new Map<string, string>()
 

@@ -75,9 +75,6 @@ function SummaryBar({ tasks }: { tasks: ReturnType<typeof selectFilteredTasks> }
     failed: tasks.filter((t) => t.status === 'failed').length
   }
 
-  const totalRuntime = tasks.reduce((acc, t) => acc + (t.runtime_seconds ?? 0), 0)
-  const totalFiles = tasks.reduce((acc, t) => acc + (t.changed_files_count ?? 0), 0)
-
   return (
     <div className="grid grid-cols-4 gap-3">
       <StatCard label="Running" value={counts.running} color="text-emerald-400" dot="bg-emerald-400" pulse />

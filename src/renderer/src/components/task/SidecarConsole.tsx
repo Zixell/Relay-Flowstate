@@ -5,7 +5,30 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import type { Task } from '../../types'
-import { XTERM_THEME } from './Terminal'
+
+const XTERM_THEME = {
+  background: '#0a0a0a',
+  foreground: '#e4e4e7',
+  cursor: '#a1a1aa',
+  cursorAccent: '#0a0a0a',
+  selectionBackground: '#3f3f4680',
+  black: '#18181b',
+  red: '#f87171',
+  green: '#4ade80',
+  yellow: '#fbbf24',
+  blue: '#60a5fa',
+  magenta: '#c084fc',
+  cyan: '#22d3ee',
+  white: '#e4e4e7',
+  brightBlack: '#52525b',
+  brightRed: '#f87171',
+  brightGreen: '#4ade80',
+  brightYellow: '#fbbf24',
+  brightBlue: '#60a5fa',
+  brightMagenta: '#c084fc',
+  brightCyan: '#22d3ee',
+  brightWhite: '#fafafa'
+}
 
 /**
  * Plain shell in the task's worktree, for the user's convenience only.

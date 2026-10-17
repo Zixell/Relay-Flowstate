@@ -152,7 +152,7 @@ export function CreateTaskModal({ open, onClose }: CreateTaskModalProps) {
         })
         // The stored row carries what main decided: chat vs terminal, worktree, metadata.
         const stored = (await window.api.tasks.getById(created.id)) as Task | null
-        task = stored ?? { ...newTask, id: created.id, transport: created.transport }
+        task = stored ?? { ...newTask, id: created.id }
       }
 
       addTask(task)
