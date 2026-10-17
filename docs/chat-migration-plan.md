@@ -53,6 +53,10 @@ Users on a Claude Pro/Max login can still run `claude` there by hand.
   - modes map to approval policy + sandbox (Ask / Auto sandboxed / Read only / Full access); the worktree's git common dir is a writable root
   - models from `~/.codex/models_cache.json`, refreshed via `model/list`; follow-ups during a turn use `turn/steer`
   - live test: `RELAY_E2E=1 npx vitest run src/main/agents/codex-chat.e2e.test.ts`
+- [x] Import of sessions started outside the app (`src/main/session/import.ts`, sidebar ⤓ button)
+  - Claude via Agent SDK `listSessions`/`getSessionMessages`/`forkSession`; Codex via app-server `thread/list`/`thread/read`/`thread/fork`
+  - default: continue the same session in its original folder; option: fork it into a new worktree
+  - history is replayed through the adapters' live mappers; imported turns have no snapshots (no per-turn diff/revert)
 - [ ] 5. AcpAdapter (Gemini CLI, OpenCode, Goose)
 - [ ] 6. Parity: slash commands, attachments, usage/cost, notifications, fork-from-turn, sidecar console (plain shell, no logic)
 - [ ] 7. Remove legacy PTY agent path (keep node-pty only for the sidecar console), convert old Claude/Codex tasks (same session id), update README

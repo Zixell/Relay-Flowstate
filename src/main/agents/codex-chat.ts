@@ -7,17 +7,20 @@ import type {
   AgentEvent,
   AgentSession,
   ChatSupport,
+  ExternalSessionInfo,
   FileDiff,
+  HistoryEntry,
   PermissionOption,
   PlanItem,
   SessionContext,
+  SessionHistory,
   ToolKind,
   TurnEndReason,
   TurnUsage,
   UserInput
 } from './adapter'
 import { EventHub } from './adapter'
-import { JsonRpcProcess, RpcError, type RpcRequest } from './jsonrpc'
+import { JsonRpcProcess, RpcError, type RpcHandlers, type RpcRequest } from './jsonrpc'
 import { resolveExecutable } from './resolve-executable'
 import { relativizer } from './paths'
 
@@ -136,6 +139,46 @@ function gitCommonDir(cwd: string): string | null {
   return dir ? (isAbsolute(dir) ? dir : resolve(cwd, dir)) : null
 }
 
+/** Spawns `codex app-server` and completes the initialize handshake. */
+async function startAppServer(
+  cwd: string,
+  handlers: Omit<RpcHandlers, 'onStderr'>
+): Promise<JsonRpcProcess> {
+  const executable = resolveExecutable('codex')
+  if (!executable) throw new Error('Codex CLI not found. Install it with `npm i -g @openai/codex` and run `codex login`.')
+  // npm-installed codex is a node script; a GUI app's PATH may not contain node.
+  const env = { ...process.env, PATH: `${dirname(executable)}:${process.env.PATH ?? ''}` }
+  const rpc = new JsonRpcProcess(executable, ['app-server'], { cwd, env }, {
+    ...handlers,
+    onStderr: (text) => console.warn('[relay][codex]', text.trimEnd())
+  })
+  try {
+    await rpc.request('initialize', {
+      clientInfo: { name: 'relay', title: 'Relay', version: '1.0.0' },
+      capabilities: { experimentalApi: false, requestAttestation: false }
+    })
+  } catch (err) {
+    rpc.kill()
+    throw err
+  }
+  rpc.notify('initialized')
+  return rpc
+}
+
+/** A short-lived app-server for one-off requests (listing, reading, forking threads). */
+async function withAppServer<T>(fn: (rpc: JsonRpcProcess) => Promise<T>): Promise<T> {
+  const rpc = await startAppServer(homedir(), {
+    onNotification: () => {},
+    onRequest: () => Promise.reject(new RpcError('Not supported', -32601)),
+    onExit: () => {}
+  })
+  try {
+    return await fn(rpc)
+  } finally {
+    rpc.kill()
+  }
+}
+
 class CodexSession implements AgentSession {
   private hub = new EventHub()
   private rpc: JsonRpcProcess | null = null
@@ -184,12 +227,7 @@ class CodexSession implements AgentSession {
 
   async start(): Promise<void> {
     if (this.rpc) return
-    const executable = resolveExecutable('codex')
-    if (!executable) throw new Error('Codex CLI not found. Install it with `npm i -g @openai/codex` and run `codex login`.')
-    // npm-installed codex is a node script; a GUI app's PATH may not contain node.
-    const env = { ...process.env, PATH: `${dirname(executable)}:${process.env.PATH ?? ''}` }
-
-    this.rpc = new JsonRpcProcess(executable, ['app-server'], { cwd: this.ctx.cwd, env }, {
+    this.rpc = await startAppServer(this.ctx.cwd, {
       onNotification: (method, params) => {
         try {
           this.onNotification(method, params as Record<string, unknown>)
@@ -202,15 +240,8 @@ class CodexSession implements AgentSession {
         if (this.disposed) return
         this.finishTurn('error')
         this.emit({ type: 'session.exited', code })
-      },
-      onStderr: (text) => console.warn('[relay][codex]', text.trimEnd())
+      }
     })
-
-    await this.rpc.request('initialize', {
-      clientInfo: { name: 'relay', title: 'Relay', version: '1.0.0' },
-      capabilities: { experimentalApi: false, requestAttestation: false }
-    })
-    this.rpc.notify('initialized')
 
     void this.rpc
       .request<{ data: { id: string; displayName: string; hidden: boolean }[] }>('model/list', {})
@@ -406,6 +437,12 @@ class CodexSession implements AgentSession {
     }
   }
 
+  /** Feeds a stored, finished item through the live mapping (history import). */
+  replayItem(item: unknown): void {
+    this.itemStarted(item as Item)
+    this.itemCompleted(item as Item)
+  }
+
   private onRequest(req: RpcRequest): Promise<unknown> {
     const p = (req.params ?? {}) as Record<string, unknown>
     switch (req.method) {
@@ -539,6 +576,76 @@ class CodexSession implements AgentSession {
   }
 }
 
+interface StoredThread {
+  id: string
+  name: string | null
+  preview: string
+  cwd: string
+  createdAt: number
+  updatedAt: number
+  gitInfo?: { branch?: string | null } | null
+  turns?: { items: Item[] }[]
+}
+
+function imageFromDataUrl(url: string): { mediaType: string; data: string } | null {
+  const m = url.match(/^data:([^;]+);base64,(.*)$/)
+  return m ? { mediaType: m[1], data: m[2] } : null
+}
+
+const codexHistory: SessionHistory = {
+  async list() {
+    return withAppServer(async (rpc) => {
+      const out: ExternalSessionInfo[] = []
+      let cursor: string | null = null
+      do {
+        const page: { data: StoredThread[]; nextCursor: string | null } = await rpc.request('thread/list', { limit: 100, cursor })
+        for (const t of page.data) {
+          out.push({
+            sessionId: t.id,
+            title: t.name || t.preview || 'Untitled session',
+            cwd: t.cwd,
+            createdAt: t.createdAt * 1000,
+            updatedAt: t.updatedAt * 1000,
+            gitBranch: t.gitInfo?.branch ?? undefined
+          })
+        }
+        cursor = page.nextCursor
+      } while (cursor && out.length < 1000)
+      return out
+    })
+  },
+
+  async load(sessionId, cwd) {
+    const { thread } = await withAppServer((rpc) =>
+      rpc.request<{ thread: StoredThread }>('thread/read', { threadId: sessionId, includeTurns: true })
+    )
+    const entries: HistoryEntry[] = []
+    const mapper = new CodexSession({ taskId: 'import', cwd, getBool: () => false })
+    mapper.onEvent((event) => entries.push({ type: 'event', event }))
+    for (const turn of thread.turns ?? []) {
+      for (const item of turn.items) {
+        if (item.type !== 'userMessage') {
+          mapper.replayItem(item)
+          continue
+        }
+        const content = ((item as { content?: Record<string, unknown>[] }).content ?? [])
+        const text = content.filter((c) => c.type === 'text').map((c) => String(c.text ?? '')).join('\n\n')
+        const images = content
+          .filter((c) => c.type === 'image' && typeof c.url === 'string')
+          .map((c) => imageFromDataUrl(c.url as string))
+          .filter((i): i is { mediaType: string; data: string } => i !== null)
+        if (text.trim() || images.length) entries.push({ type: 'user', text, images })
+      }
+    }
+    return entries
+  },
+
+  async fork(sessionId) {
+    const r = await withAppServer((rpc) => rpc.request<{ thread: { id: string } }>('thread/fork', { threadId: sessionId }))
+    return r.thread.id
+  }
+}
+
 export const codexChat: ChatSupport = {
   capabilities: {
     resume: true,
@@ -550,5 +657,6 @@ export const codexChat: ChatSupport = {
     },
     modes: MODES.map(({ id, label }) => ({ id, label }))
   },
-  createSession: (ctx) => new CodexSession(ctx)
+  createSession: (ctx) => new CodexSession(ctx),
+  history: codexHistory
 }

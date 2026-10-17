@@ -158,6 +158,13 @@ const api = {
     }
   },
 
+  // Sessions run with the agents' own CLIs, importable as chat tasks
+  sessions: {
+    listExternal: () => ipcRenderer.invoke('sessions:listExternal'),
+    import: (req: { agentId: string; sessionId: string; cwd: string; title: string; worktree: boolean }) =>
+      ipcRenderer.invoke('sessions:import', req)
+  },
+
   // Per-turn history of file changes
   turns: {
     list: (taskId: string) => ipcRenderer.invoke('turns:list', taskId),

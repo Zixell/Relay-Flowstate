@@ -6,6 +6,7 @@ import { Dashboard } from '../dashboard/Dashboard'
 import { TaskDetail } from '../task/TaskDetail'
 import { CreateTaskModal } from '../modals/CreateTaskModal'
 import { SettingsModal } from '../modals/SettingsModal'
+import { ImportSessionsModal } from '../modals/ImportSessionsModal'
 
 export function Layout() {
   const selectedTask = useAppStore(selectSelectedTask)
@@ -13,6 +14,8 @@ export function Layout() {
   const closeCreateModal = useAppStore((s) => s.closeCreateModal)
   const isSettingsOpen = useAppStore((s) => s.isSettingsOpen)
   const closeSettings = useAppStore((s) => s.closeSettings)
+  const isImportOpen = useAppStore((s) => s.isImportOpen)
+  const closeImport = useAppStore((s) => s.closeImport)
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0a0a0a] text-zinc-100 select-none">
@@ -28,6 +31,7 @@ export function Layout() {
 
       <CreateTaskModal open={isCreateModalOpen} onClose={closeCreateModal} />
       <SettingsModal open={isSettingsOpen} onClose={closeSettings} />
+      <ImportSessionsModal open={isImportOpen} onClose={closeImport} />
     </div>
   )
 }

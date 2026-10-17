@@ -27,6 +27,7 @@ interface AppState {
   statusFilter: string | null
   isCreateModalOpen: boolean
   isSettingsOpen: boolean
+  isImportOpen: boolean
   isLoading: boolean
 
   // Actions
@@ -40,6 +41,8 @@ interface AppState {
   closeCreateModal: () => void
   openSettings: () => void
   closeSettings: () => void
+  openImport: () => void
+  closeImport: () => void
   addTask: (task: Task) => void
   updateTask: (id: string, updates: Partial<Task>) => void
   deleteTask: (id: string) => void
@@ -62,6 +65,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   statusFilter: null,
   isCreateModalOpen: false,
   isSettingsOpen: false,
+  isImportOpen: false,
   isLoading: false,
 
   setTasks: (tasks) => set({ tasks }),
@@ -79,6 +83,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeCreateModal: () => set({ isCreateModalOpen: false }),
   openSettings: () => set({ isSettingsOpen: true }),
   closeSettings: () => set({ isSettingsOpen: false }),
+  openImport: () => set({ isImportOpen: true }),
+  closeImport: () => set({ isImportOpen: false }),
 
   addTask: (task) =>
     set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] })),

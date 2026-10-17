@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAppStore } from '../stores/appStore'
 import { applyChatEvent, emptyChat, type ChatState } from '../stores/chatReducer'
 import type { ChatEventPayload, ChatMessage, PlanItem, TurnInfo } from '../types'
 
@@ -39,6 +40,10 @@ export function useChat(taskId: string): ChatHandle {
       if (pending.current) pending.current.push(payload)
       else setState((s) => applyChatEvent(s, payload))
       if (payload.event.type === 'turn.completed') void refreshTurns()
+      // The agent reports the mode it actually started in; keep the picker honest.
+      if (payload.event.type === 'session.started' && payload.event.mode) {
+        useAppStore.getState().updateTask(taskId, { mode: payload.event.mode })
+      }
     })
 
     Promise.all([

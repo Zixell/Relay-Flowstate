@@ -132,9 +132,66 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
   return entry
 }
 
+/**
+ * Writes what an event adds to the transcript. Shared by live sessions and by
+ * history imported from sessions run outside the app.
+ */
+export function persistEvent(taskId: string, turnId: string | null, e: AgentEvent): MessageRow | undefined {
+  switch (e.type) {
+    case 'message.completed':
+      if (!e.text.trim()) return undefined
+      return insertMessage({ id: randomUUID(), task_id: taskId, turn_id: turnId, role: 'assistant', kind: 'text', content: e.text })
+
+    case 'thinking':
+      if (!e.text.trim()) return undefined
+      return insertMessage({ id: randomUUID(), task_id: taskId, turn_id: turnId, role: 'assistant', kind: 'thinking', content: e.text })
+
+    case 'tool.started':
+      return insertMessage({
+        id: randomUUID(),
+        task_id: taskId,
+        turn_id: turnId,
+        role: 'tool',
+        kind: 'tool_call',
+        tool_call_id: e.toolCallId,
+        tool_status: 'running',
+        content: JSON.stringify({ kind: e.kind, name: e.name, title: e.title, input: e.input })
+      })
+
+    case 'tool.completed': {
+      const row = getMessageByToolCall(taskId, e.toolCallId)
+      if (!row) return undefined
+      const content = JSON.parse(row.content ?? '{}')
+      content.output = e.output && e.output.length > MAX_TOOL_OUTPUT ? e.output.slice(0, MAX_TOOL_OUTPUT) + '\n…(truncated)' : e.output
+      if (e.diff) content.diff = e.diff
+      return updateMessage(row.id, { content: JSON.stringify(content), tool_status: e.status })
+    }
+
+    case 'permission.requested':
+      return insertMessage({
+        id: e.requestId,
+        task_id: taskId,
+        turn_id: turnId,
+        role: 'system',
+        kind: 'permission',
+        tool_call_id: e.toolCallId,
+        tool_status: 'pending',
+        content: JSON.stringify({ title: e.title, detail: e.detail, options: e.options })
+      })
+
+    case 'permission.resolved':
+      return updateMessage(e.requestId, { tool_status: e.optionId })
+
+    case 'error':
+      return insertMessage({ id: randomUUID(), task_id: taskId, turn_id: turnId, role: 'system', kind: 'error', content: e.message })
+
+    default:
+      return undefined
+  }
+}
+
 function handleEvent(s: LiveSession, e: AgentEvent): void {
   const { taskId } = s
-  let message: MessageRow | undefined
 
   switch (e.type) {
     case 'session.started':
@@ -155,64 +212,11 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'message.completed':
       s.streaming.delete(e.messageId)
-      if (e.text.trim()) {
-        message = insertMessage({ id: randomUUID(), task_id: taskId, turn_id: s.turnId, role: 'assistant', kind: 'text', content: e.text })
-      }
-      break
-
-    case 'thinking':
-      if (e.text.trim()) {
-        message = insertMessage({ id: randomUUID(), task_id: taskId, turn_id: s.turnId, role: 'assistant', kind: 'thinking', content: e.text })
-      }
-      break
-
-    case 'tool.started':
-      message = insertMessage({
-        id: randomUUID(),
-        task_id: taskId,
-        turn_id: s.turnId,
-        role: 'tool',
-        kind: 'tool_call',
-        tool_call_id: e.toolCallId,
-        tool_status: 'running',
-        content: JSON.stringify({ kind: e.kind, name: e.name, title: e.title, input: e.input })
-      })
-      break
-
-    case 'tool.completed': {
-      const row = getMessageByToolCall(taskId, e.toolCallId)
-      if (!row) break
-      const content = JSON.parse(row.content ?? '{}')
-      content.output = e.output && e.output.length > MAX_TOOL_OUTPUT ? e.output.slice(0, MAX_TOOL_OUTPUT) + '\n…(truncated)' : e.output
-      if (e.diff) content.diff = e.diff
-      message = updateMessage(row.id, { content: JSON.stringify(content), tool_status: e.status })
-      break
-    }
-
-    case 'permission.requested':
-      message = insertMessage({
-        id: e.requestId,
-        task_id: taskId,
-        turn_id: s.turnId,
-        role: 'system',
-        kind: 'permission',
-        tool_call_id: e.toolCallId,
-        tool_status: 'pending',
-        content: JSON.stringify({ title: e.title, detail: e.detail, options: e.options })
-      })
-      break
-
-    case 'permission.resolved':
-      message = updateMessage(e.requestId, { tool_status: e.optionId })
       break
 
     case 'plan.updated':
       s.plan = e.items
       updateTaskPlan(taskId, e.items)
-      break
-
-    case 'error':
-      message = insertMessage({ id: randomUUID(), task_id: taskId, turn_id: s.turnId, role: 'system', kind: 'error', content: e.message })
       break
 
     case 'turn.completed':
@@ -230,6 +234,7 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
       break
   }
 
+  const message = persistEvent(taskId, s.turnId, e)
   setStatus(s, reduceStatus(s.status, e))
   emitToRenderer(taskId, { event: e, message })
 }

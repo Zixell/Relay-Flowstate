@@ -4,9 +4,11 @@ import type {
   AgentSession,
   ChatSupport,
   FileDiff,
+  HistoryEntry,
   PermissionOption,
   PlanItem,
   SessionContext,
+  SessionHistory,
   ToolKind,
   TurnEndReason,
   TurnUsage,
@@ -423,6 +425,11 @@ class ClaudeSession implements AgentSession {
     await this.query?.setModel(model === 'default' ? undefined : model)
   }
 
+  /** Feeds a stored transcript message through the live mapping (history import). */
+  replay(msg: unknown): void {
+    this.handle(msg as SDKMessage)
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     for (const p of this.permissions.values()) p.resolve({ behavior: 'deny', message: 'Session closed' })
@@ -430,6 +437,77 @@ class ClaudeSession implements AgentSession {
     this.input.close()
     this.query?.close()
     this.query = null
+  }
+}
+
+/** CLI bookkeeping that is stored as user messages but was never typed by the user. */
+function isMetaUserText(text: string): boolean {
+  const t = text.trimStart()
+  return (
+    t.startsWith('<command-') ||
+    t.startsWith('<local-command') ||
+    t.startsWith('<system-reminder>') ||
+    t.startsWith('Caveat: The messages below were generated') ||
+    t.startsWith('This session is being continued from a previous conversation') ||
+    t.startsWith('[Request interrupted by user')
+  )
+}
+
+const claudeHistory: SessionHistory = {
+  async list() {
+    const sdk = await loadSdk()
+    const sessions = await sdk.listSessions()
+    return sessions
+      .filter((s) => s.cwd)
+      .map((s) => ({
+        sessionId: s.sessionId,
+        title: s.customTitle || s.summary || s.firstPrompt || 'Untitled session',
+        cwd: s.cwd!,
+        createdAt: s.createdAt,
+        updatedAt: s.lastModified,
+        gitBranch: s.gitBranch
+      }))
+  },
+
+  async load(sessionId, cwd) {
+    const sdk = await loadSdk()
+    const messages = await sdk.getSessionMessages(sessionId)
+    const entries: HistoryEntry[] = []
+    const mapper = new ClaudeSession({ taskId: 'import', cwd, getBool: () => false })
+    mapper.onEvent((event) => entries.push({ type: 'event', event }))
+
+    for (const m of messages) {
+      if (m.parent_tool_use_id) continue
+      const message = m.message as { content?: unknown }
+      if (m.type === 'assistant') {
+        mapper.replay(m)
+        continue
+      }
+      if (m.type !== 'user') continue
+      if (typeof message.content === 'string') {
+        if (!isMetaUserText(message.content)) entries.push({ type: 'user', text: message.content })
+        continue
+      }
+      if (!Array.isArray(message.content)) continue
+      const blocks = message.content as Record<string, unknown>[]
+      if (blocks.some((b) => b.type === 'tool_result')) mapper.replay(m)
+      const text = blocks
+        .filter((b) => b.type === 'text' && typeof b.text === 'string' && !isMetaUserText(b.text as string))
+        .map((b) => b.text as string)
+        .join('\n\n')
+      const images = blocks
+        .filter((b) => b.type === 'image')
+        .map((b) => b.source as { type?: string; media_type?: string; data?: string })
+        .filter((src) => src?.type === 'base64' && src.data)
+        .map((src) => ({ mediaType: src.media_type ?? 'image/png', data: src.data! }))
+      if (text.trim() || images.length) entries.push({ type: 'user', text, images })
+    }
+    return entries
+  },
+
+  async fork(sessionId) {
+    const sdk = await loadSdk()
+    return (await sdk.forkSession(sessionId)).sessionId
   }
 }
 
@@ -442,5 +520,6 @@ export const claudeChat: ChatSupport = {
     models: MODELS,
     modes: MODES
   },
-  createSession: (ctx) => new ClaudeSession(ctx)
+  createSession: (ctx) => new ClaudeSession(ctx),
+  history: claudeHistory
 }

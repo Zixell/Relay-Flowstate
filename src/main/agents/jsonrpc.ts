@@ -19,7 +19,7 @@ export class RpcError extends Error {
   }
 }
 
-interface Handlers {
+export interface RpcHandlers {
   onNotification: (method: string, params: unknown) => void
   /** Requests the agent sends to us (approvals). The returned value is the result. */
   onRequest: (req: RpcRequest) => Promise<unknown>
@@ -39,7 +39,7 @@ export class JsonRpcProcess {
   /** Set by kill(): stdin is ending, nothing may be written any more. */
   private closing = false
 
-  constructor(cmd: string, args: string[], opts: SpawnOptionsWithoutStdio, private handlers: Handlers) {
+  constructor(cmd: string, args: string[], opts: SpawnOptionsWithoutStdio, private handlers: RpcHandlers) {
     this.proc = spawn(cmd, args, { ...opts, stdio: 'pipe' })
     createInterface({ input: this.proc.stdout }).on('line', (line) => this.onLine(line))
     this.proc.stderr.on('data', (d) => handlers.onStderr?.(String(d)))

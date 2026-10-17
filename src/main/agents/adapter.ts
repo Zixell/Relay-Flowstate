@@ -106,10 +106,40 @@ export interface AgentSession {
   onEvent(cb: (event: AgentEvent) => void): () => void
 }
 
+/** A session the user ran with the agent's own CLI or IDE plugin, outside the app. */
+export interface ExternalSessionInfo {
+  sessionId: string
+  title: string
+  /** Directory the session ran in. */
+  cwd: string
+  createdAt?: number
+  /** Milliseconds since epoch. */
+  updatedAt: number
+  gitBranch?: string
+}
+
+/** One step of an imported transcript, in order. */
+export type HistoryEntry =
+  | { type: 'user'; text: string; images?: { mediaType: string; data: string }[] }
+  | { type: 'event'; event: AgentEvent }
+
+/** Reading and continuing sessions that were started outside the app. */
+export interface SessionHistory {
+  list(): Promise<ExternalSessionInfo[]>
+  /** The transcript as user messages and normalized agent events. */
+  load(sessionId: string, cwd: string): Promise<HistoryEntry[]>
+  /**
+   * Copies the session so it can continue in another directory without
+   * touching the original. Returns the id to resume.
+   */
+  fork(sessionId: string, cwd: string): Promise<string>
+}
+
 /** Chat-mode half of an agent definition. */
 export interface ChatSupport {
   capabilities: AgentCapabilities
   createSession: (ctx: SessionContext) => AgentSession
+  history?: SessionHistory
 }
 
 /** Small event emitter shared by adapters. */

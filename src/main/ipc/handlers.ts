@@ -63,6 +63,7 @@ import {
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
+import { listImportableSessions, importSession, type ImportRequest } from '../session/import'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
 /** Setting that routes chat-capable agents to chat mode instead of a terminal. */
@@ -408,6 +409,10 @@ export function registerIpcHandlers(): void {
     resizeConsole(taskId, cols, rows)
   )
   ipcMain.handle('console:close', (_, taskId: string) => closeConsole(taskId))
+
+  // --- Sessions started outside the app (agent CLIs) ---
+  ipcMain.handle('sessions:listExternal', () => listImportableSessions())
+  ipcMain.handle('sessions:import', (_, req: ImportRequest) => importSession(req))
 
   // --- Turns (per-turn history of file changes) ---
   ipcMain.handle('turns:list', (_, taskId: string) => {

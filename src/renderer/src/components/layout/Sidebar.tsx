@@ -7,7 +7,8 @@ import {
   ChevronRight,
   Terminal,
   Zap,
-  Trash2
+  Trash2,
+  Download
 } from 'lucide-react'
 import { cn, getProjectInitials } from '../../lib/utils'
 import { useAppStore, selectFilteredTasks } from '../../stores/appStore'
@@ -32,6 +33,7 @@ export function Sidebar({ className }: SidebarProps) {
     setProjectFilter,
     setSearch,
     openCreateModal,
+    openImport,
     openSettings,
     deleteTask,
     deleteProject
@@ -103,16 +105,21 @@ export function Sidebar({ className }: SidebarProps) {
       </div>
 
       {/* New task button */}
-      <div className="px-3 mb-3">
+      <div className="px-3 mb-3 flex gap-1.5">
         <Button
           variant="primary"
           size="sm"
-          className="w-full gap-1.5 h-8 text-xs"
+          className="flex-1 gap-1.5 h-8 text-xs"
           onClick={openCreateModal}
         >
           <Plus className="w-3.5 h-3.5" />
           New Task
         </Button>
+        {isElectron && (
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0 shrink-0" onClick={openImport} title="Import sessions from Claude Code, Codex…">
+            <Download className="w-3.5 h-3.5" />
+          </Button>
+        )}
       </div>
 
       {/* Search */}

@@ -172,7 +172,7 @@ export function upsertProject(project: {
   // If path already exists, return the existing record; otherwise insert
   db.prepare(
     'INSERT OR IGNORE INTO projects (id, name, path, description) VALUES (@id, @name, @path, @description)'
-  ).run(project)
+  ).run({ ...project, description: project.description ?? null })
   return db.prepare('SELECT * FROM projects WHERE path = ?').get(project.path) as ReturnType<typeof upsertProject>
 }
 
@@ -502,6 +502,16 @@ export function getMessages(taskId: string, opts: { beforeSeq?: number; limit?: 
     )
     .all(taskId, opts.beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[]
   return rows.reverse()
+}
+
+/** Agent session ids tied to tasks, and the external sessions tasks were imported from. */
+export function getTaskSessionLinks(): { id: string; agent_session_id: string | null; metadata: string | null }[] {
+  if (!db) return []
+  return db.prepare('SELECT id, agent_session_id, metadata FROM tasks').all() as {
+    id: string
+    agent_session_id: string | null
+    metadata: string | null
+  }[]
 }
 
 export function updateTaskPlan(id: string, plan: unknown[]): void {
