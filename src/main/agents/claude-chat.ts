@@ -1,5 +1,4 @@
 import { randomUUID } from 'crypto'
-import { realpathSync } from 'fs'
 import type {
   AgentEvent,
   AgentSession,
@@ -15,6 +14,7 @@ import type {
 } from './adapter'
 import { EventHub } from './adapter'
 import { resolveExecutable } from './resolve-executable'
+import { relativizer } from './paths'
 
 // The SDK is ESM-only; load it lazily so the main bundle (CJS) can require this file.
 type SdkModule = typeof import('@anthropic-ai/claude-agent-sdk')
@@ -72,23 +72,6 @@ function toolKind(name: string): ToolKind {
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
-}
-
-/** Shows paths inside the task's worktree relative to it. */
-function relativizer(cwd: string): (p: string) => string {
-  const roots = new Set([cwd])
-  try {
-    roots.add(realpathSync(cwd))
-  } catch {
-    // cwd may not exist yet
-  }
-  return (p) => {
-    for (const root of roots) {
-      if (p === root) return '.'
-      if (p.startsWith(root + '/')) return p.slice(root.length + 1)
-    }
-    return p
-  }
 }
 
 /** One-line description of a tool call, shown as the card title. */

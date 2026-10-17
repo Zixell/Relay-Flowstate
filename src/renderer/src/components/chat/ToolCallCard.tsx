@@ -50,9 +50,25 @@ function shortPath(p: string): string {
   return parts.length > 3 ? '…/' + parts.slice(-3).join('/') : p
 }
 
-function DiffView({ diff }: { diff: FileDiff }) {
+type DiffLine = { type: 'add' | 'del' | 'ctx' | 'hunk'; text: string }
+
+/** Lines of a unified diff, without the file headers. */
+function patchLines(patch: string): DiffLine[] {
+  const out: DiffLine[] = []
+  for (const line of patch.replace(/\n$/, '').split('\n')) {
+    if (line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff ') || line.startsWith('index ')) continue
+    if (line.startsWith('@@')) out.push({ type: 'hunk', text: line.replace(/^(@@[^@]*@@).*/, '$1') })
+    else if (line.startsWith('+')) out.push({ type: 'add', text: line.slice(1) })
+    else if (line.startsWith('-')) out.push({ type: 'del', text: line.slice(1) })
+    else if (!line.startsWith('\\')) out.push({ type: 'ctx', text: line.slice(1) })
+  }
+  return out
+}
+
+function DiffView({ diff, showPath }: { diff: FileDiff; showPath?: boolean }) {
   const lines = useMemo(() => {
-    const out: { type: 'add' | 'del' | 'ctx'; text: string }[] = []
+    if (diff.patch != null && diff.oldText == null && diff.newText == null) return patchLines(diff.patch)
+    const out: DiffLine[] = []
     for (const part of diffLines(diff.oldText ?? '', diff.newText ?? '')) {
       const type = part.added ? 'add' : part.removed ? 'del' : 'ctx'
       const rows = part.value.replace(/\n$/, '').split('\n')
@@ -61,10 +77,11 @@ function DiffView({ diff }: { diff: FileDiff }) {
       for (const text of shown) out.push({ type, text })
     }
     return out
-  }, [diff.oldText, diff.newText])
+  }, [diff.oldText, diff.newText, diff.patch])
 
   return (
     <div className="font-mono text-[11.5px] leading-[1.55] overflow-x-auto">
+      {showPath && <div className="px-3 py-1 text-zinc-500 bg-white/[0.02] border-b border-white/[0.04]">{diff.path}</div>}
       {lines.map((l, i) => (
         <div
           key={i}
@@ -72,10 +89,11 @@ function DiffView({ diff }: { diff: FileDiff }) {
             'px-3 whitespace-pre',
             l.type === 'add' && 'bg-emerald-500/10 text-emerald-300',
             l.type === 'del' && 'bg-red-500/10 text-red-300',
-            l.type === 'ctx' && 'text-zinc-500'
+            l.type === 'ctx' && 'text-zinc-500',
+            l.type === 'hunk' && 'text-sky-400/70 bg-sky-500/[0.04]'
           )}
         >
-          <span className="select-none inline-block w-3 opacity-60">{l.type === 'add' ? '+' : l.type === 'del' ? '−' : ' '}</span>
+          <span className="select-none inline-block w-3 opacity-60">{l.type === 'add' ? '+' : l.type === 'del' ? '−' : l.type === 'hunk' ? '' : ' '}</span>
           {l.text}
         </div>
       ))}
@@ -90,6 +108,8 @@ function Output({ text }: { text: string }) {
     </pre>
   )
 }
+
+export { DiffView }
 
 export const ToolCallCard = memo(function ToolCallCard({ message }: { message: ChatMessage }) {
   const tool = useMemo<ToolCallContent>(() => {
@@ -145,7 +165,7 @@ export const ToolCallCard = memo(function ToolCallCard({ message }: { message: C
             </pre>
           )}
           {hasDiff
-            ? tool.diff!.map((d, i) => <DiffView key={i} diff={d} />)
+            ? tool.diff!.map((d, i) => <DiffView key={i} diff={d} showPath={tool.diff!.length > 1} />)
             : tool.output && <Output text={tool.output} />}
           {hasDiff && status === 'error' && tool.output && <Output text={tool.output} />}
         </div>

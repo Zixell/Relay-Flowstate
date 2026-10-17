@@ -2,8 +2,9 @@ import { homedir } from 'os'
 import { join } from 'path'
 import type { AgentDefinition } from './types'
 import { UUID_RE_SOURCE } from './session-watcher'
+import { codexChat, CODEX_BYPASS_APPROVALS } from './codex-chat'
 
-const BYPASS_APPROVALS = 'CODEX_BYPASS_APPROVALS'
+const BYPASS_APPROVALS = CODEX_BYPASS_APPROVALS
 
 function baseArgs(getBool: (key: string, fallback: boolean) => boolean): string[] {
   // --dangerously-bypass-approvals-and-sandbox is Codex's equivalent of Claude's
@@ -77,6 +78,7 @@ export const codexAgent: AgentDefinition = {
   versionArgs: ['--version'],
 
   tracked: true,
+  chat: codexChat,
   // `codex "<prompt>"` opens the TUI and immediately starts on the prompt, which
   // is far more reliable than typing into the composer after startup.
   promptDelivery: 'arg',
@@ -110,7 +112,7 @@ export const codexAgent: AgentDefinition = {
       key: BYPASS_APPROVALS,
       label: 'Bypass approvals and sandbox',
       description:
-        'Passes --dangerously-bypass-approvals-and-sandbox when launching Codex. Disable to run with --full-auto instead, which sandboxes writes to the workspace. Takes effect on the next session start or restart.',
+        'Passes --dangerously-bypass-approvals-and-sandbox when launching Codex. Disable to run with --full-auto instead, which sandboxes writes to the workspace. In chat mode this picks the default permission mode (Full access vs Auto). Takes effect on the next session start or restart.',
       type: 'boolean',
       default: true
     }
