@@ -57,6 +57,8 @@ export type AgentEvent =
   | { type: 'thinking'; messageId: string; text: string }
   | { type: 'tool.started'; toolCallId: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: 'tool.completed'; toolCallId: string; status: 'ok' | 'error'; output?: string; diff?: FileDiff[] }
+  /** Details that arrive after the call started (ACP agents refine title and arguments). */
+  | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[] }
   | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
   | { type: 'permission.resolved'; requestId: string; optionId: string }
   | { type: 'plan.updated'; items: PlanItem[] }

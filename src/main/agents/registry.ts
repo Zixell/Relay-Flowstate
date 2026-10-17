@@ -3,7 +3,8 @@ import { getSetting } from '../settings'
 import type { AgentDefinition, AgentDescriptor, AgentId } from './types'
 import { claudeCodeAgent } from './claude-code'
 import { codexAgent } from './codex'
-import { aiderAgent, openCodeAgent, genericAgent } from './others'
+import { aiderAgent, genericAgent } from './others'
+import { geminiAgent, openCodeAgent, gooseAgent } from './acp-agents'
 
 /**
  * The agent catalog. Registration order is the order shown in the UI.
@@ -12,8 +13,10 @@ import { aiderAgent, openCodeAgent, genericAgent } from './others'
 const AGENTS: AgentDefinition[] = [
   claudeCodeAgent,
   codexAgent,
-  aiderAgent,
+  geminiAgent,
   openCodeAgent,
+  gooseAgent,
+  aiderAgent,
   genericAgent
 ]
 

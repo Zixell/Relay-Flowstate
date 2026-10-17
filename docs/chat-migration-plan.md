@@ -57,7 +57,11 @@ Users on a Claude Pro/Max login can still run `claude` there by hand.
   - Claude via Agent SDK `listSessions`/`getSessionMessages`/`forkSession`; Codex via app-server `thread/list`/`thread/read`/`thread/fork`
   - default: continue the same session in its original folder; option: fork it into a new worktree
   - history is replayed through the adapters' live mappers; imported turns have no snapshots (no per-turn diff/revert)
-- [ ] 5. AcpAdapter (Gemini CLI, OpenCode, Goose)
+- [x] 5. AcpAdapter (`src/main/agents/acp-chat.ts`): Gemini CLI (`gemini --acp`), OpenCode (`opencode acp`), Goose (`goose acp`)
+  - modes/models come from the agent's session (`modes` / `configOptions`), cached in `userData/acp-capabilities.json`
+  - placeholder tool calls are held until their arguments arrive; later details flow as `tool.updated`
+  - follow-ups during a turn are queued (ACP has one prompt in flight); resume via `session/resume` or `session/load`; import via `session/list`/`load`/`fork`
+  - tests: mock agent `src/main/agents/__fixtures__/mock-acp-agent.cjs`; live: `RELAY_E2E=1 RELAY_ACP_BIN=… npx vitest run src/main/agents/acp-chat.e2e.test.ts` (verified with `@agentclientprotocol/claude-agent-acp`)
 - [ ] 6. Parity: slash commands, attachments, usage/cost, notifications, fork-from-turn, sidecar console (plain shell, no logic)
 - [ ] 7. Remove legacy PTY agent path (keep node-pty only for the sidecar console), convert old Claude/Codex tasks (same session id), update README
 

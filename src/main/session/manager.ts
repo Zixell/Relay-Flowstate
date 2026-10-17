@@ -167,6 +167,17 @@ export function persistEvent(taskId: string, turnId: string | null, e: AgentEven
       return updateMessage(row.id, { content: JSON.stringify(content), tool_status: e.status })
     }
 
+    case 'tool.updated': {
+      const row = getMessageByToolCall(taskId, e.toolCallId)
+      if (!row) return undefined
+      const content = JSON.parse(row.content ?? '{}')
+      if (e.kind) content.kind = e.kind
+      if (e.title) content.title = e.title
+      if (e.input !== undefined) content.input = e.input
+      if (e.diff) content.diff = e.diff
+      return updateMessage(row.id, { content: JSON.stringify(content) })
+    }
+
     case 'permission.requested':
       return insertMessage({
         id: e.requestId,

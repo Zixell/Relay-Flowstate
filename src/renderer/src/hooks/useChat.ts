@@ -41,8 +41,11 @@ export function useChat(taskId: string): ChatHandle {
       else setState((s) => applyChatEvent(s, payload))
       if (payload.event.type === 'turn.completed') void refreshTurns()
       // The agent reports the mode it actually started in; keep the picker honest.
-      if (payload.event.type === 'session.started' && payload.event.mode) {
-        useAppStore.getState().updateTask(taskId, { mode: payload.event.mode })
+      if (payload.event.type === 'session.started') {
+        const store = useAppStore.getState()
+        if (payload.event.mode) store.updateTask(taskId, { mode: payload.event.mode })
+        // ACP agents announce their modes and models only when a session opens.
+        void store.loadAgents()
       }
     })
 

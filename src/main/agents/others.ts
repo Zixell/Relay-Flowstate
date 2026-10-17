@@ -26,24 +26,6 @@ export const aiderAgent: AgentDefinition = {
   settings: []
 }
 
-export const openCodeAgent: AgentDefinition = {
-  id: 'opencode',
-  label: 'OpenCode',
-  description: 'Open-source coding agent (coming soon)',
-  color: '#06b6d4',
-  enabled: false,
-
-  binary: 'opencode',
-  versionArgs: ['--version'],
-
-  tracked: true,
-  promptDelivery: 'input',
-
-  buildLaunchCommand: () => ({ cmd: 'opencode', args: [] }),
-
-  settings: []
-}
-
 /**
  * Plain interactive shell. `tracked: false` disables status detection and
  * summary generation — there is no agent whose activity we could interpret.
