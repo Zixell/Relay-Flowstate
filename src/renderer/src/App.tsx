@@ -16,6 +16,12 @@ export default function App() {
     return () => clearInterval(interval)
   }, [loadData, refreshTasks])
 
+  // A clicked system notification opens its task.
+  useEffect(() => {
+    if (!window.api?.chat?.onSelectTask) return
+    return window.api.chat.onSelectTask((taskId) => useAppStore.getState().selectTask(taskId))
+  }, [])
+
   // Chat-mode tasks report status changes centrally, not through a mounted terminal.
   useEffect(() => {
     if (!window.api?.chat) return

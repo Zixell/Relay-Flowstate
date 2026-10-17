@@ -107,6 +107,15 @@ const api = {
     send: (taskId: string, input: { text: string; images?: { mediaType: string; data: string }[] }) =>
       ipcRenderer.invoke('chat:send', { taskId, input }),
     interrupt: (taskId: string) => ipcRenderer.invoke('chat:interrupt', taskId),
+    fork: (taskId: string, turnId: string) => ipcRenderer.invoke('chat:fork', { taskId, turnId }),
+    /** A notification was clicked: the main process asks to show this task. */
+    onSelectTask: (callback: (taskId: string) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, taskId: string) => callback(taskId)
+      ipcRenderer.on('app:selectTask', listener)
+      return () => {
+        ipcRenderer.removeListener('app:selectTask', listener)
+      }
+    },
     respondPermission: (taskId: string, requestId: string, optionId: string) =>
       ipcRenderer.invoke('chat:permission', { taskId, requestId, optionId }),
     setMode: (taskId: string, mode: string) => ipcRenderer.invoke('chat:setMode', { taskId, mode }),

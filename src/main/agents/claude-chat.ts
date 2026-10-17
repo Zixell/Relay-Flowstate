@@ -7,6 +7,7 @@ import type {
   HistoryEntry,
   PermissionOption,
   PlanItem,
+  RateLimitInfo,
   SessionContext,
   SessionHistory,
   ToolKind,
@@ -39,6 +40,14 @@ const MODES: { id: PermissionMode; label: string }[] = [
   { id: 'auto', label: 'Auto' },
   { id: 'bypassPermissions', label: 'Bypass permissions' }
 ]
+
+const RATE_LIMIT_LABELS: Record<string, string> = {
+  five_hour: '5-hour',
+  seven_day: 'Weekly',
+  seven_day_opus: 'Weekly Opus',
+  seven_day_sonnet: 'Weekly Sonnet',
+  overage: 'Extra usage'
+}
 
 const MODELS = [
   { id: 'default', label: 'Default' },
@@ -249,6 +258,13 @@ class ClaudeSession implements AgentSession {
             mode: msg.permissionMode,
             slashCommands: msg.slash_commands
           })
+          // The init message has names only; the full list carries descriptions.
+          void this.query
+            ?.supportedCommands()
+            .then((commands) => this.emitCommands(commands))
+            .catch(() => {})
+        } else if (msg.subtype === 'commands_changed') {
+          this.emitCommands(msg.commands)
         }
         return
 
@@ -266,6 +282,8 @@ class ClaudeSession implements AgentSession {
       case 'assistant': {
         // Subagent traffic is summarized by its parent Task tool call.
         if (msg.parent_tool_use_id) return
+        this.lastAssistantUuid = msg.uuid
+        if (msg.message.usage) this.lastUsage = msg.message.usage as unknown as Record<string, number>
         const apiId = msg.message.id
         for (const block of msg.message.content) {
           const index = this.blockCounts.get(apiId) ?? 0
@@ -309,7 +327,33 @@ class ClaudeSession implements AgentSession {
         return
       }
 
+      case 'rate_limit_event': {
+        const info = msg.rate_limit_info
+        const label = info.rateLimitType ? RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType : 'Usage'
+        this.limits.set(label, {
+          label,
+          usedPercent: info.utilization != null ? Math.round(info.utilization * 100) : undefined,
+          resetsAt: info.resetsAt ? info.resetsAt * 1000 : undefined,
+          status: info.status === 'rejected' ? 'blocked' : info.status === 'allowed_warning' ? 'warning' : 'ok'
+        })
+        this.emit({ type: 'usage.updated', usage: { limits: [...this.limits.values()] } })
+        return
+      }
+
       case 'result': {
+        const windows = Object.values(msg.modelUsage ?? {}).map((u) => u.contextWindow).filter(Boolean)
+        const u = this.lastUsage
+        this.emit({
+          type: 'usage.updated',
+          usage: {
+            contextUsed: u
+              ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0)
+              : undefined,
+            contextSize: windows.length ? Math.max(...windows) : undefined,
+            costUsd: msg.total_cost_usd,
+            limits: this.limits.size ? [...this.limits.values()] : undefined
+          }
+        })
         let reason: TurnEndReason = 'end_turn'
         if (this.interruptRequested) reason = 'interrupted'
         else if (msg.subtype !== 'success' || msg.is_error) reason = 'error'
@@ -319,7 +363,11 @@ class ClaudeSession implements AgentSession {
           this.emit({ type: 'error', message: errors, fatal: false })
         }
         this.finishTurn(reason, {
-          inputTokens: msg.usage?.input_tokens,
+          // Cached prompt tokens are still context the turn used.
+          inputTokens:
+            msg.usage != null
+              ? (msg.usage.input_tokens ?? 0) + (msg.usage.cache_read_input_tokens ?? 0) + (msg.usage.cache_creation_input_tokens ?? 0)
+              : undefined,
           outputTokens: msg.usage?.output_tokens,
           costUsd: msg.total_cost_usd,
           durationMs: msg.duration_ms
@@ -333,6 +381,17 @@ class ClaudeSession implements AgentSession {
   }
 
   private streamMessageId: string | null = null
+  /** Last top-level assistant message: the point a fork of this turn continues from. */
+  private lastAssistantUuid: string | null = null
+  private lastUsage: Record<string, number> | null = null
+  private limits = new Map<string, RateLimitInfo>()
+
+  private emitCommands(commands: { name: string; description?: string; argumentHint?: string }[]): void {
+    this.emit({
+      type: 'commands.updated',
+      commands: commands.map((c) => ({ name: c.name.replace(/^\//, ''), description: c.description || undefined, hint: c.argumentHint || undefined }))
+    })
+  }
 
   private finishTurn(reason: TurnEndReason, usage?: TurnUsage): void {
     if (!this.currentTurn) return
@@ -346,7 +405,7 @@ class ClaudeSession implements AgentSession {
       this.emit({ type: 'permission.resolved', requestId: id, optionId: 'deny' })
     }
     this.permissions.clear()
-    this.emit({ type: 'turn.completed', turnId, reason, usage })
+    this.emit({ type: 'turn.completed', turnId, reason, usage, checkpoint: this.lastAssistantUuid ?? undefined })
   }
 
   private askPermission(
@@ -505,9 +564,9 @@ const claudeHistory: SessionHistory = {
     return entries
   },
 
-  async fork(sessionId) {
+  async fork(sessionId, _cwd, upTo) {
     const sdk = await loadSdk()
-    return (await sdk.forkSession(sessionId)).sessionId
+    return (await sdk.forkSession(sessionId, upTo ? { upToMessageId: upTo } : undefined)).sessionId
   }
 }
 
@@ -517,6 +576,7 @@ export const claudeChat: ChatSupport = {
     interrupt: true,
     permissions: true,
     images: true,
+    forkFromTurn: true,
     models: MODELS,
     modes: MODES
   },

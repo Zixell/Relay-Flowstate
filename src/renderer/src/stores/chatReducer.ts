@@ -1,4 +1,4 @@
-import type { ChatEventPayload, ChatMessage, PlanItem } from '../types'
+import type { ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo } from '../types'
 
 export interface ChatState {
   /** Persisted messages ordered by seq. */
@@ -12,7 +12,9 @@ export interface ChatState {
   /** Running session cost reported by the agent. */
   costUsd?: number
   sessionModel?: string
-  slashCommands: string[]
+  commands: SlashCommandInfo[]
+  /** Context fill, cost and plan limits, merged from partial reports. */
+  usage: SessionUsage | null
 }
 
 export const emptyChat = (): ChatState => ({
@@ -21,7 +23,8 @@ export const emptyChat = (): ChatState => ({
   streamingOrder: [],
   plan: [],
   inTurn: false,
-  slashCommands: []
+  commands: [],
+  usage: null
 })
 
 /** Inserts or replaces a message, keeping seq order. */
@@ -42,7 +45,19 @@ export function applyChatEvent(state: ChatState, { event, message }: ChatEventPa
 
   switch (event.type) {
     case 'session.started':
-      return { ...next, sessionModel: event.model, slashCommands: event.slashCommands ?? next.slashCommands }
+      return {
+        ...next,
+        sessionModel: event.model,
+        // Names only until the agent sends the full list.
+        commands: next.commands.length ? next.commands : (event.slashCommands ?? []).map((name) => ({ name }))
+      }
+    case 'commands.updated':
+      return { ...next, commands: event.commands }
+    case 'usage.updated': {
+      const usage: SessionUsage = { ...next.usage }
+      for (const [k, v] of Object.entries(event.usage)) if (v !== undefined) (usage as Record<string, unknown>)[k] = v
+      return { ...next, usage, costUsd: usage.costUsd ?? next.costUsd }
+    }
     case 'turn.started':
       return { ...next, inTurn: true }
     case 'message.delta': {

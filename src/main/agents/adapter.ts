@@ -47,6 +47,32 @@ export interface TurnUsage {
   durationMs?: number
 }
 
+/** A command the user can run by typing `/name` in the composer. */
+export interface SlashCommandInfo {
+  name: string
+  description?: string
+  /** Placeholder for the arguments, e.g. `<file>`. */
+  hint?: string
+}
+
+export interface RateLimitInfo {
+  /** e.g. "5-hour", "Weekly". */
+  label: string
+  usedPercent?: number
+  /** Milliseconds since epoch. */
+  resetsAt?: number
+  status?: 'ok' | 'warning' | 'blocked'
+}
+
+/** Session-wide usage, as last reported by the agent. */
+export interface SessionUsage {
+  /** Tokens currently in the context window. */
+  contextUsed?: number
+  contextSize?: number
+  costUsd?: number
+  limits?: RateLimitInfo[]
+}
+
 export type TurnEndReason = 'end_turn' | 'interrupted' | 'max_tokens' | 'error'
 
 export type AgentEvent =
@@ -62,7 +88,10 @@ export type AgentEvent =
   | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
   | { type: 'permission.resolved'; requestId: string; optionId: string }
   | { type: 'plan.updated'; items: PlanItem[] }
-  | { type: 'turn.completed'; turnId: string; reason: TurnEndReason; usage?: TurnUsage }
+  /** `checkpoint` is the agent's own marker for the end of this turn, used to fork from it. */
+  | { type: 'turn.completed'; turnId: string; reason: TurnEndReason; usage?: TurnUsage; checkpoint?: string }
+  | { type: 'commands.updated'; commands: SlashCommandInfo[] }
+  | { type: 'usage.updated'; usage: SessionUsage }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'session.exited'; code: number | null }
   /** Anything the normalized model has no slot for yet — kept so nothing is lost. */
@@ -80,6 +109,8 @@ export interface AgentCapabilities {
   /** The agent can ask before acting, so the UI must show permission prompts. */
   permissions: boolean
   images: boolean
+  /** The conversation can be forked at any finished turn (not only the last one). */
+  forkFromTurn?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }
@@ -132,9 +163,10 @@ export interface SessionHistory {
   load(sessionId: string, cwd: string): Promise<HistoryEntry[]>
   /**
    * Copies the session so it can continue in another directory without
-   * touching the original. Returns the id to resume.
+   * touching the original. `upTo` is a turn's checkpoint: later turns are
+   * left out. Returns the id to resume.
    */
-  fork(sessionId: string, cwd: string): Promise<string>
+  fork(sessionId: string, cwd: string, upTo?: string): Promise<string>
 }
 
 /** Chat-mode half of an agent definition. */

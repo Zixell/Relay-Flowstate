@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { applyChatEvent, emptyChat, type ChatState } from '../stores/chatReducer'
-import type { ChatEventPayload, ChatMessage, PlanItem, TurnInfo } from '../types'
+import type { ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo, TurnInfo } from '../types'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -51,7 +51,14 @@ export function useChat(taskId: string): ChatHandle {
 
     Promise.all([
       window.api.chat.history(taskId) as Promise<ChatMessage[]>,
-      window.api.chat.live(taskId) as Promise<{ active: boolean; inTurn?: boolean; streaming: Record<string, string>; plan: PlanItem[] }>
+      window.api.chat.live(taskId) as Promise<{
+        active: boolean
+        inTurn?: boolean
+        streaming: Record<string, string>
+        plan: PlanItem[]
+        commands?: SlashCommandInfo[]
+        usage?: SessionUsage | null
+      }>
     ]).then(([messages, liveState]) => {
       if (cancelled) return
       let s: ChatState = {
@@ -60,6 +67,9 @@ export function useChat(taskId: string): ChatHandle {
         streaming: liveState.streaming,
         streamingOrder: Object.keys(liveState.streaming),
         plan: liveState.plan,
+        commands: liveState.commands ?? [],
+        usage: liveState.usage ?? null,
+        costUsd: liveState.usage?.costUsd,
         inTurn: liveState.inTurn ?? Object.keys(liveState.streaming).length > 0
       }
       for (const p of pending.current ?? []) s = applyChatEvent(s, p)

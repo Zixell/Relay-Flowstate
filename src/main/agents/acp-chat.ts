@@ -331,9 +331,20 @@ class AcpMapper {
         }))
         this.emit({ type: 'plan.updated', items: this.plan })
         return
-      case 'usage_update':
+      case 'usage_update': {
+        const usage = u as unknown as { used?: number; size?: number }
         if (u.cost?.currency === 'USD') this.costUsd = u.cost.amount
+        this.emit({ type: 'usage.updated', usage: { contextUsed: usage.used, contextSize: usage.size, costUsd: this.costUsd } })
         return
+      }
+      case 'available_commands_update': {
+        const list = (u as unknown as { availableCommands?: { name: string; description?: string; input?: { hint?: string } | null }[] }).availableCommands ?? []
+        this.emit({
+          type: 'commands.updated',
+          commands: list.map((c) => ({ name: c.name, description: c.description || undefined, hint: c.input?.hint || undefined }))
+        })
+        return
+      }
       default:
         return
     }

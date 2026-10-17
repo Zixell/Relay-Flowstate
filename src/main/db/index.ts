@@ -142,6 +142,8 @@ function createSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id, seq);
     CREATE INDEX IF NOT EXISTS idx_messages_tool ON messages(task_id, tool_call_id);
   `)
+  // The agent's own marker for the end of a turn (message uuid, turn id) — where a fork continues from.
+  try { db.exec('ALTER TABLE turns ADD COLUMN checkpoint TEXT') } catch { /* already exists */ }
 }
 
 // --- Project queries ---
@@ -374,6 +376,7 @@ export interface TurnRow {
   commit_before: string | null
   commit_after: string | null
   usage_json: string | null
+  checkpoint: string | null
   started_at: number
   completed_at: number | null
 }
@@ -388,12 +391,15 @@ export function insertTurn(turn: { id: string; task_id: string; commit_before?: 
   return db.prepare('SELECT * FROM turns WHERE id = ?').get(turn.id) as TurnRow
 }
 
-export function completeTurn(id: string, fields: { status: TurnRow['status']; commit_after?: string; usage_json?: string }): void {
+export function completeTurn(
+  id: string,
+  fields: { status: TurnRow['status']; commit_after?: string; usage_json?: string; checkpoint?: string }
+): void {
   if (!db) return
   db.prepare(
     `UPDATE turns SET status = ?, commit_after = COALESCE(?, commit_after),
-     usage_json = COALESCE(?, usage_json), completed_at = unixepoch() WHERE id = ?`
-  ).run(fields.status, fields.commit_after ?? null, fields.usage_json ?? null, id)
+     usage_json = COALESCE(?, usage_json), checkpoint = COALESCE(?, checkpoint), completed_at = unixepoch() WHERE id = ?`
+  ).run(fields.status, fields.commit_after ?? null, fields.usage_json ?? null, fields.checkpoint ?? null, id)
 }
 
 export function getTurns(taskId: string): TurnRow[] {

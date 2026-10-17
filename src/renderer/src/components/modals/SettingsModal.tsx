@@ -27,6 +27,13 @@ const GENERAL_SETTINGS: AgentSettingDef[] = [
       'New tasks for agents that support it open as a chat (structured session with permission prompts and per-turn history) instead of a terminal. Each chat task still has a plain Console tab in its worktree. Existing tasks keep their mode.',
     type: 'boolean',
     default: true
+  },
+  {
+    key: 'RELAY_NOTIFICATIONS',
+    label: 'Notifications',
+    description: 'Show a system notification when a chat task finishes or needs approval while the app is in the background.',
+    type: 'boolean',
+    default: true
   }
 ]
 

@@ -35,6 +35,7 @@ export interface ChatCapabilities {
   interrupt: boolean
   permissions: boolean
   images: boolean
+  forkFromTurn?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }
@@ -230,6 +231,27 @@ export interface PermissionContent {
   options: PermissionOption[]
 }
 
+/** A command the user can run by typing `/name` in the composer. */
+export interface SlashCommandInfo {
+  name: string
+  description?: string
+  hint?: string
+}
+
+export interface RateLimitInfo {
+  label: string
+  usedPercent?: number
+  resetsAt?: number
+  status?: 'ok' | 'warning' | 'blocked'
+}
+
+export interface SessionUsage {
+  contextUsed?: number
+  contextSize?: number
+  costUsd?: number
+  limits?: RateLimitInfo[]
+}
+
 export type AgentEvent =
   | { type: 'session.started'; sessionId: string; model?: string; mode?: string; slashCommands?: string[] }
   | { type: 'turn.started'; turnId: string }
@@ -243,7 +265,15 @@ export type AgentEvent =
   | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
   | { type: 'permission.resolved'; requestId: string; optionId: string }
   | { type: 'plan.updated'; items: PlanItem[] }
-  | { type: 'turn.completed'; turnId: string; reason: string; usage?: { costUsd?: number; durationMs?: number; inputTokens?: number; outputTokens?: number } }
+  | {
+      type: 'turn.completed'
+      turnId: string
+      reason: string
+      usage?: { costUsd?: number; durationMs?: number; inputTokens?: number; outputTokens?: number }
+      checkpoint?: string
+    }
+  | { type: 'commands.updated'; commands: SlashCommandInfo[] }
+  | { type: 'usage.updated'; usage: SessionUsage }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'session.exited'; code: number | null }
   | { type: 'raw'; payload: unknown }
@@ -261,6 +291,7 @@ export interface TurnInfo {
   commit_before: string | null
   commit_after: string | null
   usage_json: string | null
+  checkpoint?: string | null
   started_at: number
   completed_at: number | null
   files: { path: string; oldPath?: string; status: 'added' | 'modified' | 'deleted' | 'renamed'; additions: number; deletions: number }[]

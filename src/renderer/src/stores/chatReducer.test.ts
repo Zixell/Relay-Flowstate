@@ -32,4 +32,15 @@ describe('chat reducer', () => {
     s = applyChatEvent(s, { event: { type: 'turn.completed', turnId: 't', reason: 'interrupted', usage: { costUsd: 0.5 } } })
     expect(s).toMatchObject({ inTurn: false, streaming: {}, costUsd: 0.5 })
   })
+
+  it('merges partial usage reports and replaces commands', () => {
+    let s = applyChatEvent(emptyChat(), { event: { type: 'session.started', sessionId: 's', slashCommands: ['compact'] } })
+    expect(s.commands).toEqual([{ name: 'compact' }])
+    s = applyChatEvent(s, { event: { type: 'commands.updated', commands: [{ name: 'review', description: 'Review code' }] } })
+    expect(s.commands).toEqual([{ name: 'review', description: 'Review code' }])
+    s = applyChatEvent(s, { event: { type: 'usage.updated', usage: { limits: [{ label: '5-hour', usedPercent: 40 }] } } })
+    s = applyChatEvent(s, { event: { type: 'usage.updated', usage: { contextUsed: 1000, contextSize: 200000, costUsd: 0.1 } } })
+    expect(s.usage).toEqual({ limits: [{ label: '5-hour', usedPercent: 40 }], contextUsed: 1000, contextSize: 200000, costUsd: 0.1 })
+    expect(s.costUsd).toBe(0.1)
+  })
 })

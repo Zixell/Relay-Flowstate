@@ -62,7 +62,12 @@ Users on a Claude Pro/Max login can still run `claude` there by hand.
   - placeholder tool calls are held until their arguments arrive; later details flow as `tool.updated`
   - follow-ups during a turn are queued (ACP has one prompt in flight); resume via `session/resume` or `session/load`; import via `session/list`/`load`/`fork`
   - tests: mock agent `src/main/agents/__fixtures__/mock-acp-agent.cjs`; live: `RELAY_E2E=1 RELAY_ACP_BIN=… npx vitest run src/main/agents/acp-chat.e2e.test.ts` (verified with `@agentclientprotocol/claude-agent-acp`)
-- [ ] 6. Parity: slash commands, attachments, usage/cost, notifications, fork-from-turn, sidecar console (plain shell, no logic)
+- [x] 6. Parity
+  - slash commands: `commands.updated` from Claude (`supportedCommands`, `commands_changed`) and ACP (`available_commands_update`); composer menu on `/`
+  - usage: `usage.updated` (context fill, cost, plan limits from Claude `rate_limit_event` / Codex `account/rateLimits/updated` / ACP `usage_update`); per-turn tokens in the footer
+  - notifications while the app is in the background (finished / failed / needs approval), click opens the task, dock badge = tasks waiting; setting `RELAY_NOTIFICATIONS`
+  - fork from a turn (`src/main/session/fork.ts`): new worktree restored to the turn's snapshot + agent session forked at the turn's checkpoint (Claude message uuid, Codex `lastTurnId`; ACP only from the last turn)
+  - attachments and the sidecar console were done earlier
 - [ ] 7. Remove legacy PTY agent path (keep node-pty only for the sidecar console), convert old Claude/Codex tasks (same session id), update README
 
 ## Notes

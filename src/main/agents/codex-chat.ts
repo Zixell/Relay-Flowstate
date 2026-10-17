@@ -12,6 +12,7 @@ import type {
   HistoryEntry,
   PermissionOption,
   PlanItem,
+  RateLimitInfo,
   SessionContext,
   SessionHistory,
   ToolKind,
@@ -104,6 +105,23 @@ interface PendingApproval {
   respond: (result: unknown) => void
   decisions: { allow_once: unknown; allow_always?: unknown; deny: unknown }
   rpcId: string | number
+}
+
+interface RateWindow {
+  usedPercent: number
+  windowDurationMins: number | null
+  resetsAt: number | null
+}
+
+function rateLimit(w: RateWindow): RateLimitInfo {
+  const mins = w.windowDurationMins ?? 0
+  const label = mins === 300 ? '5-hour' : mins === 10080 ? 'Weekly' : mins >= 1440 ? `${Math.round(mins / 1440)}-day` : mins ? `${Math.round(mins / 60)}-hour` : 'Usage'
+  return {
+    label,
+    usedPercent: Math.round(w.usedPercent),
+    resetsAt: w.resetsAt ? w.resetsAt * 1000 : undefined,
+    status: w.usedPercent >= 100 ? 'blocked' : w.usedPercent >= 80 ? 'warning' : 'ok'
+  }
 }
 
 /** `/bin/zsh -lc "ls -la"` → `ls -la` */
@@ -312,8 +330,19 @@ class CodexSession implements AgentSession {
       }
 
       case 'thread/tokenUsage/updated': {
-        const total = (p.tokenUsage as { total: TokenBreakdown }).total
-        this.usageTotal = { inputTokens: total.inputTokens, outputTokens: total.outputTokens }
+        const usage = p.tokenUsage as { total: TokenBreakdown; last: TokenBreakdown & { totalTokens: number }; modelContextWindow: number | null }
+        this.usageTotal = { inputTokens: usage.total.inputTokens, outputTokens: usage.total.outputTokens }
+        this.emit({
+          type: 'usage.updated',
+          usage: { contextUsed: usage.last.totalTokens, contextSize: usage.modelContextWindow ?? undefined }
+        })
+        return
+      }
+
+      case 'account/rateLimits/updated': {
+        const snap = p.rateLimits as { primary: RateWindow | null; secondary: RateWindow | null }
+        const limits = [snap.primary, snap.secondary].filter((w): w is RateWindow => Boolean(w)).map(rateLimit)
+        if (limits.length) this.emit({ type: 'usage.updated', usage: { limits } })
         return
       }
 
@@ -500,6 +529,7 @@ class CodexSession implements AgentSession {
   private finishTurn(reason: TurnEndReason, usage?: TurnUsage): void {
     if (!this.currentTurn) return
     const turnId = this.currentTurn
+    const checkpoint = this.codexTurn ?? undefined
     this.currentTurn = null
     this.codexTurn = null
     this.interruptRequested = false
@@ -509,7 +539,7 @@ class CodexSession implements AgentSession {
     }
     this.approvals.clear()
     this.itemTitles.clear()
-    this.emit({ type: 'turn.completed', turnId, reason, usage })
+    this.emit({ type: 'turn.completed', turnId, reason, usage, checkpoint })
   }
 
   // --- Us → agent -----------------------------------------------------------
@@ -640,8 +670,10 @@ const codexHistory: SessionHistory = {
     return entries
   },
 
-  async fork(sessionId) {
-    const r = await withAppServer((rpc) => rpc.request<{ thread: { id: string } }>('thread/fork', { threadId: sessionId }))
+  async fork(sessionId, _cwd, upTo) {
+    const r = await withAppServer((rpc) =>
+      rpc.request<{ thread: { id: string } }>('thread/fork', { threadId: sessionId, lastTurnId: upTo ?? null })
+    )
     return r.thread.id
   }
 }
@@ -652,6 +684,7 @@ export const codexChat: ChatSupport = {
     interrupt: true,
     permissions: true,
     images: true,
+    forkFromTurn: true,
     get models() {
       return models
     },

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Brain, ChevronRight, AlertTriangle, ImageOff, Loader2, FileCode, Undo2, CircleDot, CheckCircle2, Circle } from 'lucide-react'
+import { Brain, ChevronRight, AlertTriangle, ImageOff, Loader2, FileCode, Undo2, CircleDot, CheckCircle2, Circle, GitFork } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
 import { useAppStore } from '../../stores/appStore'
-import type { ChatMessage, PlanItem, Task, TurnInfo } from '../../types'
+import type { ChatMessage, PlanItem, SessionUsage, Task, TurnInfo } from '../../types'
 import { Markdown } from './Markdown'
 import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
@@ -101,11 +101,29 @@ function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
   )
 }
 
-function TurnFooter({ taskId, turn, onRevert }: { taskId: string; turn: TurnInfo; onRevert: () => void }) {
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
+  return String(n)
+}
+
+function TurnFooter({
+  taskId,
+  turn,
+  onRevert,
+  onFork
+}: {
+  taskId: string
+  turn: TurnInfo
+  onRevert: () => void
+  /** Present when this turn can be forked. */
+  onFork?: () => Promise<void>
+}) {
   const [showChanges, setShowChanges] = useState(false)
+  const [forking, setForking] = useState(false)
   const usage = useMemo(() => {
     try {
-      return turn.usage_json ? (JSON.parse(turn.usage_json) as { durationMs?: number }) : null
+      return turn.usage_json ? (JSON.parse(turn.usage_json) as { durationMs?: number; inputTokens?: number; outputTokens?: number }) : null
     } catch {
       return null
     }
@@ -118,6 +136,11 @@ function TurnFooter({ taskId, turn, onRevert }: { taskId: string; turn: TurnInfo
       {turn.status === 'interrupted' && <span className="text-zinc-500">Interrupted</span>}
       {turn.status === 'failed' && <span className="text-red-400/80">Failed</span>}
       {usage?.durationMs != null && <span>{Math.round(usage.durationMs / 1000)}s</span>}
+      {usage?.outputTokens != null && (
+        <span title={`${usage.inputTokens ?? 0} input / ${usage.outputTokens} output tokens`}>
+          {formatTokens(usage.inputTokens ?? 0)} in · {formatTokens(usage.outputTokens)} out
+        </span>
+      )}
       {turn.files.length > 0 && (
         <>
           <button
@@ -136,6 +159,24 @@ function TurnFooter({ taskId, turn, onRevert }: { taskId: string; turn: TurnInfo
           </button>
         </>
       )}
+      {onFork && (
+        <button
+          onClick={async () => {
+            setForking(true)
+            try {
+              await onFork()
+            } finally {
+              setForking(false)
+            }
+          }}
+          disabled={forking}
+          className="flex items-center gap-1 hover:text-zinc-300 disabled:opacity-60"
+          title="Start a new task from this point: the conversation so far and the files as they were after this turn"
+        >
+          {forking ? <Loader2 className="w-3 h-3 animate-spin" /> : <GitFork className="w-3 h-3" />}
+          Fork
+        </button>
+      )}
     </div>
     {showChanges && turn.files.length > 0 && (
       <div className="mt-2">
@@ -143,6 +184,39 @@ function TurnFooter({ taskId, turn, onRevert }: { taskId: string; turn: TurnInfo
       </div>
     )}
     </>
+  )
+}
+
+/** Context fill, plan limits and cost of the session, under the composer. */
+function UsageBar({ usage, costUsd }: { usage: SessionUsage | null; costUsd?: number }) {
+  const ctx = usage?.contextUsed != null && usage.contextSize ? Math.min(100, Math.round((usage.contextUsed / usage.contextSize) * 100)) : null
+  // A limit with neither a figure nor a warning says nothing worth the space.
+  const limits = (usage?.limits ?? []).filter((l) => l.usedPercent != null || (l.status && l.status !== 'ok'))
+  if (ctx == null && !limits.length && costUsd == null) return null
+  return (
+    <div className="mt-1.5 flex items-center gap-3 text-[10.5px] text-zinc-600 px-1">
+      {ctx != null && (
+        <span className="flex items-center gap-1.5" title={`${usage!.contextUsed!.toLocaleString()} of ${usage!.contextSize!.toLocaleString()} tokens in context`}>
+          <span className="relative w-12 h-1 rounded-full bg-white/[0.06] overflow-hidden">
+            <span
+              className={cn('absolute inset-y-0 left-0 rounded-full', ctx >= 85 ? 'bg-red-400/70' : ctx >= 60 ? 'bg-amber-400/70' : 'bg-zinc-500')}
+              style={{ width: `${Math.max(ctx, 2)}%` }}
+            />
+          </span>
+          Context {ctx}% · {formatTokens(usage!.contextUsed!)} / {formatTokens(usage!.contextSize!)}
+        </span>
+      )}
+      {limits.map((l) => (
+        <span
+          key={l.label}
+          className={cn(l.status === 'blocked' ? 'text-red-400/80' : l.status === 'warning' ? 'text-amber-400/80' : undefined)}
+          title={l.resetsAt ? `Resets ${new Date(l.resetsAt).toLocaleString()}` : undefined}
+        >
+          {l.label} {l.usedPercent != null ? `${l.usedPercent}%` : l.status === 'blocked' ? 'limit reached' : ''}
+        </span>
+      ))}
+      {costUsd != null && <span className="ml-auto">Session ≈ ${costUsd.toFixed(2)}</span>}
+    </div>
   )
 }
 
@@ -192,6 +266,8 @@ export function ChatView({ task }: Props) {
   const { state, turns, loading, send, interrupt, respondPermission, refreshTurns } = useChat(task.id)
   const agents = useAppStore((s) => s.agents)
   const updateTask = useAppStore((s) => s.updateTask)
+  const loadData = useAppStore((s) => s.loadData)
+  const selectTask = useAppStore((s) => s.selectTask)
   const capabilities = agents.find((a) => a.id === task.process_type)?.chat
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
@@ -270,6 +346,23 @@ export function ChatView({ task }: Props) {
     [task.id, refreshTurns]
   )
 
+  const lastTurnId = useMemo(() => [...turns].reverse().find((t) => t.status !== 'running')?.id, [turns])
+  const canFork = (turn: TurnInfo): boolean =>
+    !state.inTurn && Boolean(turn.commit_after) && (Boolean(capabilities?.forkFromTurn && turn.checkpoint) || turn.id === lastTurnId)
+
+  const handleFork = useCallback(
+    async (turn: TurnInfo) => {
+      try {
+        const forked = (await window.api.chat.fork(task.id, turn.id)) as Task
+        await loadData()
+        selectTask(forked.id)
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err))
+      }
+    },
+    [task.id, loadData, selectTask]
+  )
+
   const renderMessage = (m: ChatMessage): React.ReactNode => {
     switch (m.kind) {
       case 'text':
@@ -325,7 +418,12 @@ export function ChatView({ task }: Props) {
               <div className={cn('chat-item', i > windowStart && spacing(m, state.messages[i - 1]))}>{renderMessage(m)}</div>
               {turnEnds.has(i) && (
                 <div className="mt-2">
-                  <TurnFooter taskId={task.id} turn={turnEnds.get(i)!} onRevert={() => handleRevert(turnEnds.get(i)!)} />
+                  <TurnFooter
+                    taskId={task.id}
+                    turn={turnEnds.get(i)!}
+                    onRevert={() => handleRevert(turnEnds.get(i)!)}
+                    onFork={canFork(turnEnds.get(i)!) ? () => handleFork(turnEnds.get(i)!) : undefined}
+                  />
                 </div>
               )}
             </React.Fragment>
@@ -351,6 +449,7 @@ export function ChatView({ task }: Props) {
           <Composer
             inTurn={state.inTurn}
             capabilities={capabilities}
+            commands={state.commands}
             model={task.model}
             mode={task.mode}
             onSend={handleSend}
@@ -364,9 +463,7 @@ export function ChatView({ task }: Props) {
               void window.api.chat.setModel(task.id, model)
             }}
           />
-          {state.costUsd != null && (
-            <div className="mt-1.5 text-right text-[10.5px] text-zinc-700">Session cost ≈ ${state.costUsd.toFixed(2)}</div>
-          )}
+          <UsageBar usage={state.usage} costUsd={state.costUsd} />
         </div>
       </div>
     </div>

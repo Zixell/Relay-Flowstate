@@ -1,6 +1,6 @@
 import { BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, PlanItem, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, PlanItem, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
 import { getAgent, getBoolSetting } from '../agents'
 import {
   getTaskById,
@@ -26,9 +26,11 @@ import { generateSessionSummary } from '../summary/generator'
 import { getGitChanges } from '../git'
 import { saveAttachment } from './attachments'
 import { initialStatusState, reduceStatus, type StatusState, type TaskStatus } from './status'
+import { notifyTask, setAttentionCount } from '../notifications'
 
 interface TaskRow {
   id: string
+  title: string
   process_type: string
   project_path: string
   worktree_path?: string | null
@@ -49,6 +51,9 @@ interface LiveSession {
   /** Text streamed so far per message — the renderer needs it after a reload. */
   streaming: Map<string, string>
   plan: PlanItem[]
+  commands: SlashCommandInfo[]
+  /** Last reply text, for the "finished" notification. */
+  lastText: string
   unsubscribe: () => void
 }
 
@@ -62,6 +67,10 @@ export interface ChatEventPayload {
 const MAX_TOOL_OUTPUT = 20_000
 
 const live = new Map<string, LiveSession>()
+/** Slash commands last reported per agent, so the composer can offer them before a session starts. */
+const commandsByAgent = new Map<string, SlashCommandInfo[]>()
+/** Usage last reported per task (context, cost, limits); kept after the session ends. */
+const usageByTask = new Map<string, SessionUsage>()
 
 function send(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
@@ -77,6 +86,7 @@ function setStatus(s: LiveSession, next: StatusState): void {
   if (prev === next.status) return
   updateTaskStatus(s.taskId, next.status, { runtime_seconds: getTurnsRuntimeSeconds(s.taskId) })
   send('task:status', { taskId: s.taskId, status: next.status })
+  setAttentionCount([...live.values()].filter((x) => x.status.status === 'waiting').length)
 }
 
 function loadTask(taskId: string): TaskRow {
@@ -111,6 +121,8 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     turnId: null,
     streaming: new Map(),
     plan: storedPlan(task),
+    commands: commandsByAgent.get(task.process_type) ?? [],
+    lastText: '',
     unsubscribe: () => {}
   }
   entry.unsubscribe = session.onEvent((e) => {
@@ -223,6 +235,26 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'message.completed':
       s.streaming.delete(e.messageId)
+      if (e.text.trim()) s.lastText = e.text
+      break
+
+    case 'commands.updated': {
+      s.commands = e.commands
+      commandsByAgent.set(loadTask(taskId).process_type, e.commands)
+      break
+    }
+
+    case 'usage.updated': {
+      const prev = usageByTask.get(taskId) ?? {}
+      // Agents report pieces at different times; keep what a partial update leaves out.
+      const next: SessionUsage = { ...prev }
+      for (const [k, v] of Object.entries(e.usage)) if (v !== undefined) (next as Record<string, unknown>)[k] = v
+      usageByTask.set(taskId, next)
+      break
+    }
+
+    case 'permission.requested':
+      notifyTask(taskId, `${loadTask(taskId).title} needs approval`, e.title)
       break
 
     case 'plan.updated':
@@ -258,9 +290,17 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   const turn = getTurn(e.turnId)
   const after = snapshotWorkingTree(s.cwd, taskId, `${e.turnId}-after`) ?? undefined
   const status = e.reason === 'interrupted' ? 'interrupted' : e.reason === 'error' ? 'failed' : 'completed'
-  completeTurn(e.turnId, { status, commit_after: after, usage_json: e.usage ? JSON.stringify(e.usage) : undefined })
+  completeTurn(e.turnId, { status, commit_after: after, usage_json: e.usage ? JSON.stringify(e.usage) : undefined, checkpoint: e.checkpoint })
 
   const changed = turn?.commit_before && after ? diffSnapshotFiles(s.cwd, turn.commit_before, after) : []
+  if (e.reason !== 'interrupted') {
+    const title = loadTask(taskId).title
+    notifyTask(
+      taskId,
+      e.reason === 'error' ? `${title} failed` : `${title} finished`,
+      s.lastText.replace(/\s+/g, ' ').trim() || (changed.length ? `${changed.length} file(s) changed` : 'Done')
+    )
+  }
   insertTaskEvent({
     id: randomUUID(),
     task_id: taskId,
@@ -371,11 +411,28 @@ function storedPlan(task: TaskRow): PlanItem[] {
 }
 
 /** State the renderer cannot rebuild from messages: streaming text and the plan. */
-export function getLiveState(taskId: string): { active: boolean; inTurn: boolean; streaming: Record<string, string>; plan: PlanItem[] } {
+export interface LiveState {
+  active: boolean
+  inTurn: boolean
+  streaming: Record<string, string>
+  plan: PlanItem[]
+  commands: SlashCommandInfo[]
+  usage: SessionUsage | null
+}
+
+export function getLiveState(taskId: string): LiveState {
   const s = live.get(taskId)
-  if (s) return { active: true, inTurn: s.status.inTurn, streaming: Object.fromEntries(s.streaming), plan: s.plan }
+  const usage = usageByTask.get(taskId) ?? null
+  if (s) return { active: true, inTurn: s.status.inTurn, streaming: Object.fromEntries(s.streaming), plan: s.plan, commands: s.commands, usage }
   const task = getTaskById(taskId) as TaskRow | null
-  return { active: false, inTurn: false, streaming: {}, plan: task ? storedPlan(task) : [] }
+  return {
+    active: false,
+    inTurn: false,
+    streaming: {},
+    plan: task ? storedPlan(task) : [],
+    commands: task ? commandsByAgent.get(task.process_type) ?? [] : [],
+    usage
+  }
 }
 
 export async function disposeSession(taskId: string): Promise<void> {

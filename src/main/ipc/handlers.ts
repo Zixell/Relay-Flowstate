@@ -64,6 +64,7 @@ import {
 import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
 import { listImportableSessions, importSession, type ImportRequest } from '../session/import'
+import { forkTask } from '../session/fork'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
 /** Setting that routes chat-capable agents to chat mode instead of a terminal. */
@@ -375,6 +376,7 @@ export function registerIpcHandlers(): void {
   })
 
   // --- Chat ---
+  ipcMain.handle('chat:fork', (_, { taskId, turnId }: { taskId: string; turnId: string }) => forkTask(taskId, turnId))
   ipcMain.handle('chat:send', (_, { taskId, input }: { taskId: string; input: UserInput }) => {
     // Follow-ups show up on the timeline like the initial prompt (logged by tasks:create).
     if (input.text.trim()) {
