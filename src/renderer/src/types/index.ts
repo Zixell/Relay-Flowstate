@@ -74,6 +74,10 @@ export interface Task {
   transport?: 'pty' | 'chat'
   model?: string | null
   mode?: string | null
+  /** Chat tasks: the agent's latest reply, for the dashboard card. */
+  last_message?: string | null
+  /** Chat tasks: JSON of a permission request still waiting for an answer. */
+  pending_permission?: string | null
 }
 
 export interface TaskEvent {

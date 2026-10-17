@@ -7,6 +7,7 @@ import {
   updateTaskStatus,
   updateTaskAgentSessionId,
   updateTaskChatSettings,
+  updateTaskPlan,
   insertTaskEvent,
   insertTurn,
   completeTurn,
@@ -36,6 +37,7 @@ interface TaskRow {
   model?: string | null
   mode?: string | null
   metadata?: string | null
+  plan_json?: string | null
 }
 
 interface LiveSession {
@@ -108,7 +110,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     status: initialStatusState(task.status),
     turnId: null,
     streaming: new Map(),
-    plan: [],
+    plan: storedPlan(task),
     unsubscribe: () => {}
   }
   entry.unsubscribe = session.onEvent((e) => {
@@ -206,6 +208,7 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'plan.updated':
       s.plan = e.items
+      updateTaskPlan(taskId, e.items)
       break
 
     case 'error':
@@ -343,14 +346,20 @@ export async function setModel(taskId: string, model: string): Promise<void> {
   await live.get(taskId)?.session.setModel?.(model)
 }
 
-/** Live state that is not in the database: streaming text and the plan. */
-export function getLiveState(taskId: string): { active: boolean; streaming: Record<string, string>; plan: PlanItem[] } {
-  const s = live.get(taskId)
-  return {
-    active: Boolean(s),
-    streaming: s ? Object.fromEntries(s.streaming) : {},
-    plan: s?.plan ?? []
+function storedPlan(task: TaskRow): PlanItem[] {
+  try {
+    return task.plan_json ? (JSON.parse(task.plan_json) as PlanItem[]) : []
+  } catch {
+    return []
   }
+}
+
+/** State the renderer cannot rebuild from messages: streaming text and the plan. */
+export function getLiveState(taskId: string): { active: boolean; inTurn: boolean; streaming: Record<string, string>; plan: PlanItem[] } {
+  const s = live.get(taskId)
+  if (s) return { active: true, inTurn: s.status.inTurn, streaming: Object.fromEntries(s.streaming), plan: s.plan }
+  const task = getTaskById(taskId) as TaskRow | null
+  return { active: false, inTurn: false, streaming: {}, plan: task ? storedPlan(task) : [] }
 }
 
 export async function disposeSession(taskId: string): Promise<void> {

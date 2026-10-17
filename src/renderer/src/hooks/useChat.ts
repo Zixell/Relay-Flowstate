@@ -43,7 +43,7 @@ export function useChat(taskId: string): ChatHandle {
 
     Promise.all([
       window.api.chat.history(taskId) as Promise<ChatMessage[]>,
-      window.api.chat.live(taskId) as Promise<{ active: boolean; streaming: Record<string, string>; plan: PlanItem[] }>
+      window.api.chat.live(taskId) as Promise<{ active: boolean; inTurn?: boolean; streaming: Record<string, string>; plan: PlanItem[] }>
     ]).then(([messages, liveState]) => {
       if (cancelled) return
       let s: ChatState = {
@@ -52,7 +52,7 @@ export function useChat(taskId: string): ChatHandle {
         streaming: liveState.streaming,
         streamingOrder: Object.keys(liveState.streaming),
         plan: liveState.plan,
-        inTurn: Object.keys(liveState.streaming).length > 0
+        inTurn: liveState.inTurn ?? Object.keys(liveState.streaming).length > 0
       }
       for (const p of pending.current ?? []) s = applyChatEvent(s, p)
       pending.current = null

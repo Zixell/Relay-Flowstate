@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import {
   GitBranch,
   Clock,
@@ -11,7 +11,8 @@ import {
   PauseCircle,
   MessageSquare,
   Folder,
-  Trash2
+  Trash2,
+  ShieldAlert
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
 import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
@@ -45,7 +46,18 @@ export function TaskCard({ task }: TaskCardProps) {
     deleteTask(task.id)
   }, [task.id, deleteTask])
 
-  const logPreview = MOCK_TERMINAL_LOGS[task.id]?.slice(-300) ?? ''
+  const isChat = task.transport === 'chat'
+  const approval = useMemo(() => {
+    if (!isChat || !task.pending_permission) return null
+    try {
+      return (JSON.parse(task.pending_permission) as { title?: string }).title ?? 'Permission request'
+    } catch {
+      return 'Permission request'
+    }
+  }, [isChat, task.pending_permission])
+  const lastMessage = isChat ? plainPreview(task.last_message) : ''
+
+  const logPreview = isChat ? '' : MOCK_TERMINAL_LOGS[task.id]?.slice(-300) ?? ''
   const logLines = logPreview
     .replace(/\x1b\[[0-9;]*m/g, '') // strip ansi
     .trim()
@@ -154,6 +166,19 @@ export function TaskCard({ task }: TaskCardProps) {
           </Badge>
         </div>
 
+        {approval && (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-1.5 mb-3 text-[11px]">
+            <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="text-amber-300 shrink-0">Needs approval</span>
+            <span className="text-amber-200/60 font-mono truncate">{approval}</span>
+          </div>
+        )}
+
+        {/* Agent's latest reply */}
+        {lastMessage && !approval && (
+          <p className="text-[11.5px] text-zinc-400 leading-relaxed line-clamp-2 mb-3">{lastMessage}</p>
+        )}
+
         {/* Terminal preview */}
         {logLines && (
           <div className="rounded-lg bg-black/40 border border-white/[0.04] px-3 py-2 mb-3 overflow-hidden">
@@ -189,8 +214,8 @@ export function TaskCard({ task }: TaskCardProps) {
                 selectTask(task.id)
               }}
             >
-              <MessageSquare className="w-3 h-3" />
-              Respond
+              {approval ? <ShieldAlert className="w-3 h-3" /> : <MessageSquare className="w-3 h-3" />}
+              {approval ? 'Review' : 'Respond'}
             </Button>
           )}
           <Button
@@ -225,6 +250,18 @@ export function TaskCard({ task }: TaskCardProps) {
     )}
     </>
   )
+}
+
+/** First lines of a markdown reply as plain text. */
+function plainPreview(text: string | null | undefined): string {
+  if (!text) return ''
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[`*_#>]+/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300)
 }
 
 function StatusIcon({ status }: { status: Task['status'] }) {

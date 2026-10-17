@@ -140,3 +140,21 @@
 .chat-markdown th, .chat-markdown td { border: 1px solid rgba(255,255,255,0.08); padding: 0.3em 0.7em; text-align: left; }
 .chat-markdown th { background: rgba(255,255,255,0.03); color: #e4e4e7; font-weight: 600; }
 .chat-markdown strong { color: #fafafa; font-weight: 600; }
+
+/* Syntax highlighting in chat code blocks (highlight.js classes). */
+.chat-markdown .hljs-comment, .chat-markdown .hljs-quote { color: #6b7280; font-style: italic; }
+.chat-markdown .hljs-keyword, .chat-markdown .hljs-selector-tag, .chat-markdown .hljs-built_in, .chat-markdown .hljs-doctag { color: #c084fc; }
+.chat-markdown .hljs-string, .chat-markdown .hljs-regexp, .chat-markdown .hljs-addition, .chat-markdown .hljs-template-tag { color: #86efac; }
+.chat-markdown .hljs-number, .chat-markdown .hljs-literal, .chat-markdown .hljs-symbol, .chat-markdown .hljs-bullet { color: #fdba74; }
+.chat-markdown .hljs-title, .chat-markdown .hljs-section, .chat-markdown .hljs-title.function_ { color: #93c5fd; }
+.chat-markdown .hljs-type, .chat-markdown .hljs-title.class_, .chat-markdown .hljs-class .hljs-title { color: #fcd34d; }
+.chat-markdown .hljs-attr, .chat-markdown .hljs-attribute, .chat-markdown .hljs-variable, .chat-markdown .hljs-template-variable, .chat-markdown .hljs-property { color: #7dd3fc; }
+.chat-markdown .hljs-meta, .chat-markdown .hljs-selector-id, .chat-markdown .hljs-selector-class { color: #f0abfc; }
+.chat-markdown .hljs-name, .chat-markdown .hljs-tag { color: #f87171; }
+.chat-markdown .hljs-deletion { color: #fca5a5; }
+.chat-markdown .hljs-params { color: #e4e4e7; }
+.chat-markdown .hljs-emphasis { font-style: italic; }
+.chat-markdown .hljs-strong { font-weight: 600; }
+
+/* Off-screen chat messages skip layout and paint. */
+.chat-item { content-visibility: auto; contain-intrinsic-size: auto 60px; }

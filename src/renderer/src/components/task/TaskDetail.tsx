@@ -327,7 +327,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'chat' && <ChatView task={task} onShowFiles={() => setActiveTab('files')} />}
+        {activeTab === 'chat' && <ChatView task={task} />}
 
         {activeTab === 'console' && (
           <div className="h-full p-5">

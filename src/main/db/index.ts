@@ -108,6 +108,8 @@ function createSchema(db: Database.Database): void {
   try { db.exec("ALTER TABLE tasks ADD COLUMN transport TEXT NOT NULL DEFAULT 'pty'") } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN model TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT') } catch { /* already exists */ }
+  // The agent's latest plan (todo list), so it survives a restart.
+  try { db.exec('ALTER TABLE tasks ADD COLUMN plan_json TEXT') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT') } catch { /* already exists or table not created yet */ }
   db.exec(`
     CREATE TABLE IF NOT EXISTS turns (
@@ -175,11 +177,16 @@ export function upsertProject(project: {
 }
 
 // --- Task queries ---
+/** What the dashboard shows for chat tasks instead of terminal output. */
+const CHAT_PREVIEW_COLUMNS = `
+  (SELECT m.content FROM messages m WHERE m.task_id = t.id AND m.role = 'assistant' AND m.kind = 'text' ORDER BY m.seq DESC LIMIT 1) AS last_message,
+  (SELECT m.content FROM messages m WHERE m.task_id = t.id AND m.kind = 'permission' AND m.tool_status = 'pending' ORDER BY m.seq DESC LIMIT 1) AS pending_permission`
+
 export function getAllTasks() {
   if (!db) return []
   return db
     .prepare(
-      `SELECT t.*, p.name as project_name, p.path as project_path
+      `SELECT t.*, p.name as project_name, p.path as project_path, ${CHAT_PREVIEW_COLUMNS}
        FROM tasks t
        JOIN projects p ON t.project_id = p.id
        ORDER BY t.updated_at DESC`
@@ -191,7 +198,7 @@ export function getTaskById(id: string) {
   if (!db) return null
   return db
     .prepare(
-      `SELECT t.*, p.name as project_name, p.path as project_path
+      `SELECT t.*, p.name as project_name, p.path as project_path, ${CHAT_PREVIEW_COLUMNS}
        FROM tasks t
        JOIN projects p ON t.project_id = p.id
        WHERE t.id = ?`
@@ -415,6 +422,8 @@ export function resetRunningTurns(): void {
   // The agent process that asked is gone, so nobody can answer these anymore.
   db.prepare(`UPDATE messages SET tool_status = 'expired' WHERE kind = 'permission' AND tool_status = 'pending'`).run()
   db.prepare(`UPDATE messages SET tool_status = 'error' WHERE kind = 'tool_call' AND tool_status = 'running'`).run()
+  // No chat agent survives a restart, so none can still be working or waiting for an answer.
+  db.prepare(`UPDATE tasks SET status = 'paused' WHERE transport = 'chat' AND status IN ('running', 'waiting')`).run()
 }
 
 // --- Chat: messages ---
@@ -493,6 +502,11 @@ export function getMessages(taskId: string, opts: { beforeSeq?: number; limit?: 
     )
     .all(taskId, opts.beforeSeq ?? Number.MAX_SAFE_INTEGER, limit) as MessageRow[]
   return rows.reverse()
+}
+
+export function updateTaskPlan(id: string, plan: unknown[]): void {
+  if (!db) return
+  db.prepare('UPDATE tasks SET plan_json = ? WHERE id = ?').run(JSON.stringify(plan), id)
 }
 
 export function updateTaskChatSettings(id: string, fields: { model?: string; mode?: string }): void {

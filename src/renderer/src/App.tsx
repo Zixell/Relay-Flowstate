@@ -25,6 +25,10 @@ export default function App() {
         updated_at: Math.floor(Date.now() / 1000),
         ...(changedFilesCount != null && { changed_files_count: changedFilesCount })
       })
+      // The dashboard card shows the latest reply and any pending approval.
+      void window.api.tasks.getById(taskId).then((row: Task | null) => {
+        if (row) updateTask(taskId, { last_message: row.last_message, pending_permission: row.pending_permission })
+      })
     })
   }, [updateTask])
 

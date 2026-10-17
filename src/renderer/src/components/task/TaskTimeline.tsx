@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   MessageSquare,
   Bot,
@@ -10,8 +10,9 @@ import {
   CheckCircle2
 } from 'lucide-react'
 import { cn, formatTimestamp } from '../../lib/utils'
-import type { TaskEvent } from '../../types'
+import type { TaskEvent, TurnInfo } from '../../types'
 import { MOCK_EVENTS } from '../../lib/mockData'
+import { TurnChanges } from '../chat/TurnChanges'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -22,6 +23,15 @@ interface TaskTimelineProps {
 export function TaskTimeline({ taskId }: TaskTimelineProps) {
   const [events, setEvents] = useState<TaskEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [turns, setTurns] = useState<Map<string, TurnInfo>>(new Map())
+
+  // Chat turns carry snapshot diffs; load them so turn events can show what changed.
+  const loadTurns = useCallback(() => {
+    if (!isElectron || !window.api.turns) return
+    window.api.turns.list(taskId).then((list: TurnInfo[]) => setTurns(new Map(list.map((t) => [t.id, t]))))
+  }, [taskId])
+
+  useEffect(loadTurns, [loadTurns])
 
   useEffect(() => {
     if (!isElectron) {
@@ -37,9 +47,10 @@ export function TaskTimeline({ taskId }: TaskTimelineProps) {
 
     const unsub = window.api.tasks.onEvent(taskId, (event: unknown) => {
       setEvents((prev) => [...prev, event as TaskEvent])
+      if ((event as TaskEvent).type === 'turn_completed') loadTurns()
     })
     return unsub
-  }, [taskId])
+  }, [taskId, loadTurns])
 
   if (loading) {
     return (
@@ -60,13 +71,23 @@ export function TaskTimeline({ taskId }: TaskTimelineProps) {
   return (
     <div className="space-y-1 py-2">
       {events.map((event, i) => (
-        <TimelineEvent key={event.id} event={event} isLast={i === events.length - 1} />
+        <TimelineEvent key={event.id} event={event} isLast={i === events.length - 1} taskId={taskId} turns={turns} />
       ))}
     </div>
   )
 }
 
-function TimelineEvent({ event, isLast }: { event: TaskEvent; isLast: boolean }) {
+function TimelineEvent({
+  event,
+  isLast,
+  taskId,
+  turns
+}: {
+  event: TaskEvent
+  isLast: boolean
+  taskId: string
+  turns: Map<string, TurnInfo>
+}) {
   // Unknown types (e.g. written by a newer build) render as system events, never crash.
   const config = EVENT_CONFIG[event.type] ?? EVENT_CONFIG.system
 
@@ -97,7 +118,7 @@ function TimelineEvent({ event, isLast }: { event: TaskEvent; isLast: boolean })
         ) : event.type === 'git_merge' && event.content ? (
           <MergeEventContent content={event.content} />
         ) : event.type === 'turn_completed' ? (
-          <TurnEventContent event={event} />
+          <TurnEventContent event={event} taskId={taskId} turns={turns} />
         ) : event.content ? (
           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">
             {event.content}
@@ -109,8 +130,8 @@ function TimelineEvent({ event, isLast }: { event: TaskEvent; isLast: boolean })
 }
 
 /** A finished chat turn: how it ended and which files it touched. */
-function TurnEventContent({ event }: { event: TaskEvent }) {
-  let meta: { reason?: string; files?: string[] } = {}
+function TurnEventContent({ event, taskId, turns }: { event: TaskEvent; taskId: string; turns: Map<string, TurnInfo> }) {
+  let meta: { turnId?: string; reason?: string; files?: string[] } = {}
   try {
     meta = event.metadata ? JSON.parse(event.metadata) : {}
   } catch {
@@ -118,6 +139,15 @@ function TurnEventContent({ event }: { event: TaskEvent }) {
   }
   const files = meta.files ?? []
   const ended = meta.reason === 'interrupted' ? 'Interrupted' : meta.reason === 'error' ? 'Ended with an error' : null
+  const turn = meta.turnId ? turns.get(meta.turnId) : undefined
+  if (turn?.files.length) {
+    return (
+      <div className="space-y-1.5">
+        {ended && <p className="text-xs text-zinc-500">{ended}</p>}
+        <TurnChanges taskId={taskId} turn={turn} autoOpen={false} />
+      </div>
+    )
+  }
   return (
     <div className="space-y-1">
       {ended && <p className="text-xs text-zinc-500">{ended}</p>}

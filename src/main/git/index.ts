@@ -1,5 +1,7 @@
 import { execSync, spawnSync, spawn } from 'child_process'
 import os from 'os'
+import fs from 'fs'
+import path from 'path'
 
 export interface GitFileChange {
   path: string
@@ -141,8 +143,23 @@ export function getFileDiff(cwd: string, filePath: string, startCommit?: string)
   const escaped = filePath.replace(/"/g, '\\"')
   return (
     run(`git diff ${base} -- "${escaped}"`, cwd) ||
-    run(`git diff --cached ${base} -- "${escaped}"`, cwd)
+    run(`git diff --cached ${base} -- "${escaped}"`, cwd) ||
+    // A new file the agent has not staged: show it as fully added.
+    git(['diff', '--no-index', '--', '/dev/null', filePath], cwd).stdout
   )
+}
+
+/** Line count of a new, untracked file — its "additions". Binary or huge files count as 0. */
+function countLines(cwd: string, filePath: string): number {
+  try {
+    const full = path.join(cwd, filePath)
+    if (fs.statSync(full).size > 2_000_000) return 0
+    const text = fs.readFileSync(full, 'utf8')
+    if (text.includes('\0')) return 0
+    return text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0
+  } catch {
+    return 0
+  }
 }
 
 export interface GitWorkingFile {
@@ -381,15 +398,23 @@ export function getGitChanges(cwd: string, taskBranch?: string, startCommit?: st
       }
     }
 
-    const statusOut = run('git status --porcelain', cwd)
+    // -uall lists files inside new directories one by one, like the merge's `git add -A` will.
+    const statusOut = run('git status --porcelain -uall', cwd)
     for (const line of statusOut.split('\n')) {
       if (!line.trim()) continue
       const x = line[0]
       const y = line[1]
       const rest = line.slice(3)
 
-      // Skip untracked files — only show git-indexed changes
-      if (x === '?' && y === '?') continue
+      // New files are part of the task's work too: `git add -A` picks them up on merge.
+      if (x === '?' && y === '?') {
+        const newPath = rest.replace(/^"|"$/g, '')
+        if (newPath && !seenPaths.has(newPath)) {
+          seenPaths.add(newPath)
+          files.push({ path: newPath, type: 'added', additions: countLines(cwd, newPath), deletions: 0 })
+        }
+        continue
+      }
 
       let type: GitFileChange['type'] = 'modified'
       let path = rest.replace(/^"|"$/g, '')

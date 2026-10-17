@@ -8,6 +8,7 @@ import { Markdown } from './Markdown'
 import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
 import { Composer } from './Composer'
+import { TurnChanges } from './TurnChanges'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -100,7 +101,8 @@ function ImageViewer({ src, onClose }: { src: string; onClose: () => void }) {
   )
 }
 
-function TurnFooter({ turn, onRevert, onShowFiles }: { turn: TurnInfo; onRevert: () => void; onShowFiles: () => void }) {
+function TurnFooter({ taskId, turn, onRevert }: { taskId: string; turn: TurnInfo; onRevert: () => void }) {
+  const [showChanges, setShowChanges] = useState(false)
   const usage = useMemo(() => {
     try {
       return turn.usage_json ? (JSON.parse(turn.usage_json) as { durationMs?: number }) : null
@@ -111,13 +113,18 @@ function TurnFooter({ turn, onRevert, onShowFiles }: { turn: TurnInfo; onRevert:
   const adds = turn.files.reduce((n, f) => n + f.additions, 0)
   const dels = turn.files.reduce((n, f) => n + f.deletions, 0)
   return (
+    <>
     <div className="flex items-center gap-3 text-[11px] text-zinc-600 pl-1">
       {turn.status === 'interrupted' && <span className="text-zinc-500">Interrupted</span>}
       {turn.status === 'failed' && <span className="text-red-400/80">Failed</span>}
       {usage?.durationMs != null && <span>{Math.round(usage.durationMs / 1000)}s</span>}
       {turn.files.length > 0 && (
         <>
-          <button onClick={onShowFiles} className="flex items-center gap-1 hover:text-zinc-300">
+          <button
+            onClick={() => setShowChanges((v) => !v)}
+            className={cn('flex items-center gap-1 hover:text-zinc-300', showChanges && 'text-zinc-300')}
+            title="Show what this turn changed"
+          >
             <FileCode className="w-3 h-3" />
             {turn.files.length} file{turn.files.length === 1 ? '' : 's'}
             <span className="text-emerald-500/70">+{adds}</span>
@@ -130,13 +137,20 @@ function TurnFooter({ turn, onRevert, onShowFiles }: { turn: TurnInfo; onRevert:
         </>
       )}
     </div>
+    {showChanges && turn.files.length > 0 && (
+      <div className="mt-2">
+        <TurnChanges taskId={taskId} turn={turn} />
+      </div>
+    )}
+    </>
   )
 }
 
 function PlanPanel({ items }: { items: PlanItem[] }) {
-  const [open, setOpen] = useState(true)
-  if (!items.length) return null
   const done = items.filter((i) => i.status === 'done').length
+  // A finished plan (e.g. restored after a restart) stays out of the way.
+  const [open, setOpen] = useState(done < items.length)
+  if (!items.length) return null
   return (
     <div className="rounded-xl border border-white/[0.06] bg-[#0f0f0f] mb-3">
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-400">
@@ -170,10 +184,11 @@ function PlanPanel({ items }: { items: PlanItem[] }) {
 
 interface Props {
   task: Task
-  onShowFiles: () => void
 }
 
-export function ChatView({ task, onShowFiles }: Props) {
+const MESSAGE_WINDOW = 150
+
+export function ChatView({ task }: Props) {
   const { state, turns, loading, send, interrupt, respondPermission, refreshTurns } = useChat(task.id)
   const agents = useAppStore((s) => s.agents)
   const updateTask = useAppStore((s) => s.updateTask)
@@ -181,6 +196,9 @@ export function ChatView({ task, onShowFiles }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
   const [viewerSrc, setViewerSrc] = useState<string | null>(null)
+  // Long chats render only their tail; older messages load on demand.
+  const [windowSize, setWindowSize] = useState(MESSAGE_WINDOW)
+  const anchorHeight = useRef<number | null>(null)
 
   const turnById = useMemo(() => new Map(turns.map((t) => [t.id, t])), [turns])
 
@@ -213,12 +231,26 @@ export function ChatView({ task, onShowFiles }: Props) {
 
   useLayoutEffect(() => {
     const el = scrollRef.current
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
-  }, [state.messages, state.streaming, loading])
+    if (!el) return
+    if (anchorHeight.current != null) {
+      // Older messages were prepended: keep the view where it was.
+      el.scrollTop += el.scrollHeight - anchorHeight.current
+      anchorHeight.current = null
+    } else if (stickToBottom.current) {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [state.messages, state.streaming, loading, windowSize])
 
   useEffect(() => {
     stickToBottom.current = true
+    setWindowSize(MESSAGE_WINDOW)
   }, [task.id])
+
+  const windowStart = Math.max(0, state.messages.length - windowSize)
+  const showEarlier = (): void => {
+    anchorHeight.current = scrollRef.current?.scrollHeight ?? null
+    setWindowSize((n) => n + MESSAGE_WINDOW)
+  }
 
   const handleSend = useCallback(
     (text: string, images: { mediaType: string; data: string }[]) => {
@@ -279,16 +311,26 @@ export function ChatView({ task, onShowFiles }: Props) {
               <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
             </div>
           )}
-          {state.messages.map((m, i) => (
+          {windowStart > 0 && (
+            <div className="flex justify-center mb-4">
+              <button onClick={showEarlier} className="text-[11.5px] text-zinc-500 hover:text-zinc-300 px-3 py-1 rounded-full border border-white/[0.06] hover:bg-white/[0.03]">
+                Show {Math.min(windowStart, MESSAGE_WINDOW)} earlier message{Math.min(windowStart, MESSAGE_WINDOW) === 1 ? '' : 's'}
+              </button>
+            </div>
+          )}
+          {state.messages.slice(windowStart).map((m, j) => {
+            const i = j + windowStart
+            return (
             <React.Fragment key={m.id}>
-              <div className={spacing(m, state.messages[i - 1])}>{renderMessage(m)}</div>
+              <div className={cn('chat-item', i > windowStart && spacing(m, state.messages[i - 1]))}>{renderMessage(m)}</div>
               {turnEnds.has(i) && (
                 <div className="mt-2">
-                  <TurnFooter turn={turnEnds.get(i)!} onRevert={() => handleRevert(turnEnds.get(i)!)} onShowFiles={onShowFiles} />
+                  <TurnFooter taskId={task.id} turn={turnEnds.get(i)!} onRevert={() => handleRevert(turnEnds.get(i)!)} />
                 </div>
               )}
             </React.Fragment>
-          ))}
+            )
+          })}
           {state.streamingOrder.map((id) => (
             <div key={id} className="mt-3">
               <Markdown text={state.streaming[id] ?? ''} />
