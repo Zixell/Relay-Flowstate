@@ -40,7 +40,9 @@ export class JsonRpcProcess {
   private closing = false
 
   constructor(cmd: string, args: string[], opts: SpawnOptionsWithoutStdio, private handlers: RpcHandlers) {
-    this.proc = spawn(cmd, args, { ...opts, stdio: 'pipe' })
+    // Windows runs .cmd/.bat shims (npm-installed CLIs) only through the shell.
+    const shell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(cmd)
+    this.proc = spawn(shell ? `"${cmd}"` : cmd, args, { ...opts, stdio: 'pipe', shell, windowsHide: true })
     createInterface({ input: this.proc.stdout }).on('line', (line) => this.onLine(line))
     this.proc.stderr.on('data', (d) => handlers.onStderr?.(String(d)))
     // EPIPE and friends after the agent died must not crash the main process.

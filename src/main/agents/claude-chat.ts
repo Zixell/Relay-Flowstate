@@ -1,4 +1,6 @@
 import { randomUUID } from 'crypto'
+import { existsSync } from 'fs'
+import { dirname, join } from 'path'
 import type {
   AgentEvent,
   AgentSession,
@@ -29,6 +31,18 @@ type SDKUserMessage = import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
 type PermissionMode = import('@anthropic-ai/claude-agent-sdk').PermissionMode
 type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
 type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
+
+/**
+ * The user's `claude` for the SDK to spawn. On Windows an npm install gives a
+ * `claude.cmd` shim, which cannot be spawned directly; the SDK runs the
+ * package's `cli.js` with node instead.
+ */
+function claudeExecutable(): string | undefined {
+  const found = resolveExecutable('claude')
+  if (!found || process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(found)) return found ?? undefined
+  const cli = join(dirname(found), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')
+  return existsSync(cli) ? cli : undefined
+}
 
 let sdkPromise: Promise<SdkModule> | null = null
 const loadSdk = (): Promise<SdkModule> => (sdkPromise ??= import('@anthropic-ai/claude-agent-sdk'))
@@ -214,7 +228,7 @@ class ClaudeSession implements AgentSession {
 
   async start(): Promise<void> {
     const { query } = await loadSdk()
-    const executable = resolveExecutable('claude')
+    const executable = claudeExecutable()
     this.query = query({
       prompt: this.input,
       options: {
@@ -589,7 +603,7 @@ async function peek(ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model
       model: ctx.model && ctx.model !== 'default' ? ctx.model : undefined,
       settingSources: ['user', 'project', 'local'],
       systemPrompt: { type: 'preset', preset: 'claude_code' },
-      pathToClaudeCodeExecutable: resolveExecutable('claude') ?? undefined,
+      pathToClaudeCodeExecutable: claudeExecutable(),
       stderr: (data) => console.warn('[relay][claude peek]', data.trimEnd())
     }
   })

@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { randomUUID } from 'crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { delimiter, dirname, join } from 'path'
 import type {
   AgentCapabilities,
   AgentEvent,
@@ -373,7 +373,7 @@ async function startAgent(
   const executable = resolveExecutable(spec.binary)
   if (!executable) throw new Error(`${spec.binary} not found. Install it and make sure it is on your PATH.`)
   // npm-installed CLIs are node scripts; a GUI app's PATH may not contain node.
-  const env = { ...process.env, PATH: `${dirname(executable)}:${process.env.PATH ?? ''}` }
+  const env = { ...process.env, PATH: `${dirname(executable)}${delimiter}${process.env.PATH ?? ''}` }
   const rpc = new JsonRpcProcess(executable, spec.args, { cwd, env }, {
     ...handlers,
     onStderr: (text) => console.warn(`[relay][${spec.id}]`, text.trimEnd())

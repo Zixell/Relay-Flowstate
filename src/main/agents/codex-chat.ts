@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { spawnSync } from 'child_process'
 import { readFileSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, isAbsolute, join, resolve } from 'path'
+import { delimiter, dirname, isAbsolute, join, resolve } from 'path'
 import type {
   AgentEvent,
   AgentSession,
@@ -165,7 +165,7 @@ async function startAppServer(
   const executable = resolveExecutable('codex')
   if (!executable) throw new Error('Codex CLI not found. Install it with `npm i -g @openai/codex` and run `codex login`.')
   // npm-installed codex is a node script; a GUI app's PATH may not contain node.
-  const env = { ...process.env, PATH: `${dirname(executable)}:${process.env.PATH ?? ''}` }
+  const env = { ...process.env, PATH: `${dirname(executable)}${delimiter}${process.env.PATH ?? ''}` }
   const rpc = new JsonRpcProcess(executable, ['app-server'], { cwd, env }, {
     ...handlers,
     onStderr: (text) => console.warn('[relay][codex]', text.trimEnd())

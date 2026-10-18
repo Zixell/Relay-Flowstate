@@ -1,6 +1,6 @@
 {
   "name": "relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Mission Control for AI coding agents",
   "main": "./out/main/index.js",
   "scripts": {
@@ -10,7 +10,9 @@
     "package": "npm run build && electron-builder",
     "postinstall": "electron-builder install-app-deps",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:win": "npm run build && electron-builder --win --publish never"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.301",
@@ -71,13 +73,40 @@
       "out/**/*"
     ],
     "mac": {
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
     },
     "linux": {
       "target": "AppImage"
+    },
+    "afterPack": "build/after-pack.cjs",
+    "dmg": {
+      "artifactName": "Relay-Flowstate-${version}-mac-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "Relay-Flowstate-${version}-win-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     }
-  }
+  },
+  "author": "Roman Zhuravlev"
 }

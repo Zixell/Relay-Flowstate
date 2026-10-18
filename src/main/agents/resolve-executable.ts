@@ -16,7 +16,9 @@ export function resolveExecutable(name: string): string | null {
 
   if (process.platform === 'win32') {
     const r = spawnSync('where', [name], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
-    found = r.status === 0 ? r.stdout.split(/\r?\n/)[0]?.trim() || null : null
+    // npm installs a POSIX script next to the .cmd shim; only .exe/.cmd/.bat can be spawned.
+    const lines = r.status === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : []
+    found = lines.find((l) => /\.exe$/i.test(l)) ?? lines.find((l) => /\.(cmd|bat)$/i.test(l)) ?? null
   } else {
     const shell = process.env.SHELL || '/bin/zsh'
     const r = spawnSync(shell, ['-lic', `command -v ${name}`], { encoding: 'utf8', timeout: 5000 })
