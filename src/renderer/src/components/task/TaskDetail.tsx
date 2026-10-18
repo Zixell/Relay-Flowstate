@@ -439,7 +439,7 @@ function SessionSummaryList({ summaries }: { summaries: SessionSummaryEntry[] })
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-2 text-zinc-600">
         <CheckCircle2 className="w-6 h-6 opacity-30" />
-        <p className="text-xs">No summary yet — generated automatically after 15 s of agent inactivity</p>
+        <p className="text-xs">No summary yet — written automatically after each finished turn</p>
         <p className="text-[11px] text-zinc-700">Requires an agent CLI (Claude Code or Codex) to be installed</p>
       </div>
     )

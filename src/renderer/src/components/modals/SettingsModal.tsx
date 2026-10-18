@@ -139,7 +139,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             <div className="flex flex-col gap-2">
               {[
-                'Triggered after 15 seconds of agent inactivity',
+                'Written after each finished turn of a chat task',
                 'Runs the agent CLI headlessly in the background (no terminal window)',
                 'One summary per task — updated incrementally after each session',
                 anySummaryAgent

@@ -7,9 +7,13 @@ import { disposeAllSessions } from './session/manager'
 import { closeAllConsoles } from './console/manager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { loadSettings } from './settings'
+import { adoptLoginShellPath } from './shell-path'
 
 // Lets tests and parallel dev instances run against their own database and worktrees.
 if (process.env.RELAY_USER_DATA) app.setPath('userData', process.env.RELAY_USER_DATA)
+
+// Before anything looks for agent CLIs: see them the way the user's terminal does.
+adoptLoginShellPath()
 
 /** Poll until the Vite dev server is accepting connections, then load it. */
 function waitAndLoadURL(win: BrowserWindow, url: string, retries = 20, delay = 300): void {
