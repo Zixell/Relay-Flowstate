@@ -18,10 +18,11 @@ import {
   Check
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
-import { STATUS_CONFIG, processLabel, processColor, type Task } from '../../types'
+import { STATUS_CONFIG, type Task } from '../../types'
 import { Badge } from '../ui/badge'
 import { Button } from '../ui/button'
 import { SidecarConsole } from './SidecarConsole'
+import { AgentPicker } from '../chat/AgentSwitch'
 import { ChatView } from '../chat/ChatView'
 import { WorktreeWarning } from './WorktreeWarning'
 import { TaskTimeline } from './TaskTimeline'
@@ -46,7 +47,6 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const [mergeError, setMergeError] = useState<string | null>(null)
   const selectTask = useAppStore((s) => s.selectTask)
   const updateTask = useAppStore((s) => s.updateTask)
-  const agents = useAppStore((s) => s.agents)
 
   // Every task opens on its conversation.
   useEffect(() => {
@@ -134,7 +134,6 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
 
   const statusCfg = STATUS_CONFIG[task.status]
-  const agentColor = processColor(task.process_type, agents)
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
@@ -163,17 +162,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
                   {statusCfg.label}
                 </Badge>
 
-                {/* Process */}
-                <div
-                  className="flex items-center gap-1.5 text-[11px] font-medium"
-                  style={{ color: agentColor }}
-                >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{ backgroundColor: agentColor }}
-                  />
-                  {processLabel(task.process_type, agents)}
-                </div>
+                {/* Agent — click to continue the task with another one */}
+                <AgentPicker task={task} disabled={task.status === 'running' || task.status === 'waiting'} />
 
                 {/* Project */}
                 <div className="flex items-center gap-1 text-[11px] text-zinc-500">
@@ -306,7 +296,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'chat' && <ChatView task={task} />}
+        {/* A new agent means a new session: remount so commands, usage and pickers follow it. */}
+        {activeTab === 'chat' && <ChatView key={task.process_type} task={task} />}
 
         {activeTab === 'console' && (
           <div className="h-full p-5">

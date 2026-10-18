@@ -16,6 +16,7 @@ import { addWorktree, checkWorktreeSupport } from '../git/worktree'
 import { restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
 import { getCurrentCommit } from '../git'
 import { readAttachment, saveAttachment } from './attachments'
+import { readHandoff } from './handoff'
 
 interface TaskRow {
   id: string
@@ -29,6 +30,7 @@ interface TaskRow {
   agent_session_id: string | null
   model: string | null
   mode: string | null
+  metadata: string | null
 }
 
 /**
@@ -43,6 +45,9 @@ export async function forkTask(taskId: string, turnId: string): Promise<unknown>
   if (turn.status === 'running') throw new Error('Wait for the turn to finish before forking from it')
   if (!turn.commit_after) throw new Error('This turn has no file snapshot to fork from')
   if (!task.agent_session_id) throw new Error('The agent session of this task is unknown')
+  // Earlier turns belong to the previous agent's session, which this task no longer has.
+  const handoff = readHandoff(task.metadata)
+  if (handoff && turn.started_at < handoff.at) throw new Error(`This turn was made by ${handoff.fromLabel}; only turns after the switch can be forked`)
 
   const agent = getAgent(task.process_type)
   const history = agent.chat?.history

@@ -41,6 +41,7 @@ import {
   setModel as setChatModel,
   getLiveState,
   peekTask,
+  switchAgent,
   disposeSession
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
@@ -229,6 +230,7 @@ export function registerIpcHandlers(): void {
 
   // --- Chat ---
   ipcMain.handle('chat:fork', (_, { taskId, turnId }: { taskId: string; turnId: string }) => forkTask(taskId, turnId))
+  ipcMain.handle('chat:switchAgent', (_, { taskId, agentId }: { taskId: string; agentId: string }) => switchAgent(taskId, agentId))
   ipcMain.handle('chat:send', (_, { taskId, input }: { taskId: string; input: UserInput }) => {
     // Follow-ups show up on the timeline like the initial prompt (logged by tasks:create).
     if (input.text.trim()) {

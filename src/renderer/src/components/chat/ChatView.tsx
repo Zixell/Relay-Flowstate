@@ -9,6 +9,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
 import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
+import { HandoffDivider, LimitBanner, hitUsageLimit } from './AgentSwitch'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -347,8 +348,26 @@ export function ChatView({ task }: Props) {
   )
 
   const lastTurnId = useMemo(() => [...turns].reverse().find((t) => t.status !== 'running')?.id, [turns])
+  const handoff = useMemo(() => {
+    try {
+      return task.metadata ? (JSON.parse(task.metadata).handoff as { fromLabel: string; at: number; pending: boolean } | undefined) : undefined
+    } catch {
+      return undefined
+    }
+  }, [task.metadata])
   const canFork = (turn: TurnInfo): boolean =>
-    !state.inTurn && Boolean(turn.commit_after) && (Boolean(capabilities?.forkFromTurn && turn.checkpoint) || turn.id === lastTurnId)
+    !state.inTurn &&
+    Boolean(turn.commit_after) &&
+    // Turns before a switch belong to the previous agent's session.
+    !(handoff && turn.started_at < handoff.at) &&
+    (Boolean(capabilities?.forkFromTurn && turn.checkpoint) || turn.id === lastTurnId)
+
+  const lastError = useMemo(() => {
+    const last = state.messages[state.messages.length - 1]
+    return last?.kind === 'error' ? last.content : null
+  }, [state.messages])
+  const limitHit = !state.inTurn && hitUsageLimit(lastError, state.usage?.limits)
+  const handoffSuggestion = handoff?.pending ? `Continue where ${handoff.fromLabel} stopped.` : null
 
   const handleFork = useCallback(
     async (turn: TurnInfo) => {
@@ -373,6 +392,8 @@ export function ChatView({ task }: Props) {
         return <ToolCallCard message={m} />
       case 'permission':
         return <PermissionPrompt message={m} onRespond={respondPermission} active={m.id === lastPendingPermission} />
+      case 'handoff':
+        return <HandoffDivider content={m.content} />
       case 'error':
         return (
           <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-[12px] text-red-300">
@@ -445,13 +466,14 @@ export function ChatView({ task }: Props) {
 
       <div className="shrink-0 px-6 pb-4 pt-2">
         <div className="max-w-3xl mx-auto">
+          {limitHit && <LimitBanner task={task} />}
           <PlanPanel items={state.plan} />
           <Composer
             inTurn={state.inTurn}
             capabilities={capabilities}
             commands={state.commands}
             taskId={task.id}
-            suggestion={state.suggestion}
+            suggestion={state.suggestion ?? handoffSuggestion}
             model={task.model}
             mode={task.mode}
             onSend={handleSend}

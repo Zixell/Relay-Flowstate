@@ -346,6 +346,14 @@ export function convertLegacyTasks(): number {
   return rows.length
 }
 
+/** Moves a task to another agent: the old agent's session, model and mode no longer apply. */
+export function switchTaskAgent(id: string, processType: string, metadata: Record<string, unknown>): void {
+  if (!db) return
+  db.prepare(
+    'UPDATE tasks SET process_type = ?, agent_session_id = NULL, model = NULL, mode = NULL, metadata = ?, updated_at = unixepoch() WHERE id = ?'
+  ).run(processType, JSON.stringify(metadata), id)
+}
+
 export function updateTaskMetadata(id: string, metadata: Record<string, unknown>): void {
   if (!db) return
   db.prepare('UPDATE tasks SET metadata = ? WHERE id = ?').run(JSON.stringify(metadata), id)
@@ -439,7 +447,7 @@ export function resetRunningTurns(): void {
 
 // --- Chat: messages ---
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
-export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error'
+export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff'
 
 export interface MessageRow {
   id: string

@@ -3,13 +3,16 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { AgentEvent, AgentSession, PlanItem, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
-import { getAgent, getBoolSetting } from '../agents'
+import { getAgent, getBoolSetting, isAgentAvailable } from '../agents'
+import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
   getTaskById,
   updateTaskStatus,
   updateTaskAgentSessionId,
   updateTaskChatSettings,
   updateTaskPlan,
+  updateTaskMetadata,
+  switchTaskAgent,
   insertTaskEvent,
   insertTurn,
   completeTurn,
@@ -409,8 +412,67 @@ export async function sendMessage(taskId: string, input: UserInput): Promise<Mes
     attachments
   })
   if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { userMessage: true } }, message })
+
+  // First message to an agent that took the task over: it gets the story so far
+  // in front of it. The chat shows only what the user typed.
+  const task = loadTask(taskId)
+  const handoff = readHandoff(task.metadata)
+  if (handoff?.pending) {
+    const context = buildHandoffContext(taskId, handoff)
+    await s.session.send({ ...input, text: `${context}\n\nThe user's message:\n${input.text}` })
+    const meta = JSON.parse(task.metadata ?? '{}')
+    updateTaskMetadata(taskId, { ...meta, handoff: { ...handoff, pending: false } })
+    return message
+  }
   await s.session.send(input)
   return message
+}
+
+/**
+ * Continues a task with another agent — e.g. when the current one ran out of
+ * usage. The worktree, history and turns stay; the new agent starts a fresh
+ * session and receives the story so far with the next message.
+ */
+export async function switchAgent(taskId: string, agentId: string): Promise<unknown> {
+  const task = loadTask(taskId)
+  if (task.process_type === agentId) return getTaskById(taskId)
+  const live_ = live.get(taskId)
+  if (live_?.status.inTurn) throw new Error('Stop the current turn before switching agents')
+  const from = getAgent(task.process_type)
+  const to = getAgent(agentId)
+  if (to.id !== agentId || !isAgentAvailable(agentId)) throw new Error(`${to.label} is not installed`)
+
+  await disposeSession(taskId)
+  usageByTask.delete(taskId)
+  peeked.delete(taskId)
+
+  const meta = task.metadata ? JSON.parse(task.metadata) : {}
+  const previous = readHandoff(task.metadata)
+  const handoff: HandoffInfo = {
+    from: from.id,
+    // Switching twice before sending anything still hands over from the agent that did the work.
+    fromLabel: previous?.pending ? previous.fromLabel : from.label,
+    to: to.id,
+    toLabel: to.label,
+    at: Math.floor(Date.now() / 1000),
+    pending: true
+  }
+  switchTaskAgent(taskId, agentId, { ...meta, handoff })
+  const message = insertMessage({
+    id: randomUUID(),
+    task_id: taskId,
+    role: 'system',
+    kind: 'handoff',
+    content: JSON.stringify({ from: from.id, fromLabel: from.label, to: to.id, toLabel: to.label })
+  })
+  if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { handoff: true } }, message })
+  insertTaskEvent({
+    id: randomUUID(),
+    task_id: taskId,
+    type: 'system',
+    content: `Continued with ${to.label} (was ${from.label})`
+  })
+  return getTaskById(taskId)
 }
 
 export async function interrupt(taskId: string): Promise<void> {

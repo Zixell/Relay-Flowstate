@@ -204,7 +204,7 @@ export interface ChatMessage {
   turn_id: string | null
   seq: number
   role: 'user' | 'assistant' | 'tool' | 'system'
-  kind: 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error'
+  kind: 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff'
   content: string | null
   tool_call_id: string | null
   tool_status: string | null
