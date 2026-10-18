@@ -450,6 +450,8 @@ export function ChatView({ task }: Props) {
             inTurn={state.inTurn}
             capabilities={capabilities}
             commands={state.commands}
+            taskId={task.id}
+            suggestion={state.suggestion}
             model={task.model}
             mode={task.mode}
             onSend={handleSend}

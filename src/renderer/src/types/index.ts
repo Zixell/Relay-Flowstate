@@ -271,6 +271,8 @@ export type AgentEvent =
       checkpoint?: string
     }
   | { type: 'commands.updated'; commands: SlashCommandInfo[] }
+  /** A predicted next user message, offered as ghost text in the composer. */
+  | { type: 'prompt.suggested'; text: string }
   | { type: 'usage.updated'; usage: SessionUsage }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'session.exited'; code: number | null }

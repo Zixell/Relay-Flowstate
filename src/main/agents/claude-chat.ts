@@ -238,6 +238,7 @@ class ClaudeSession implements AgentSession {
         permissionMode: this.initialMode(),
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
+        promptSuggestions: true,
         // Behave like the user's own CLI: CLAUDE.md, settings, custom commands.
         settingSources: ['user', 'project', 'local'],
         systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -342,6 +343,10 @@ class ClaudeSession implements AgentSession {
         }
         return
       }
+
+      case 'prompt_suggestion':
+        if (msg.suggestion.trim()) this.emit({ type: 'prompt.suggested', text: msg.suggestion.trim() })
+        return
 
       case 'rate_limit_event': {
         const info = msg.rate_limit_info

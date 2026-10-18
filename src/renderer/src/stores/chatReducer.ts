@@ -15,6 +15,8 @@ export interface ChatState {
   commands: SlashCommandInfo[]
   /** Context fill, cost and plan limits, merged from partial reports. */
   usage: SessionUsage | null
+  /** The agent's guess at the next message, offered as ghost text until a new turn starts. */
+  suggestion: string | null
 }
 
 export const emptyChat = (): ChatState => ({
@@ -24,7 +26,8 @@ export const emptyChat = (): ChatState => ({
   plan: [],
   inTurn: false,
   commands: [],
-  usage: null
+  usage: null,
+  suggestion: null
 })
 
 /** Inserts or replaces a message, keeping seq order. */
@@ -59,7 +62,9 @@ export function applyChatEvent(state: ChatState, { event, message }: ChatEventPa
       return { ...next, usage, costUsd: usage.costUsd ?? next.costUsd }
     }
     case 'turn.started':
-      return { ...next, inTurn: true }
+      return { ...next, inTurn: true, suggestion: null }
+    case 'prompt.suggested':
+      return { ...next, suggestion: event.text }
     case 'message.delta': {
       const known = event.messageId in next.streaming
       return {

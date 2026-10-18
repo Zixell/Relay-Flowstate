@@ -91,6 +91,8 @@ export type AgentEvent =
   /** `checkpoint` is the agent's own marker for the end of this turn, used to fork from it. */
   | { type: 'turn.completed'; turnId: string; reason: TurnEndReason; usage?: TurnUsage; checkpoint?: string }
   | { type: 'commands.updated'; commands: SlashCommandInfo[] }
+  /** A predicted next user message, offered as ghost text in the composer. */
+  | { type: 'prompt.suggested'; text: string }
   | { type: 'usage.updated'; usage: SessionUsage }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'session.exited'; code: number | null }

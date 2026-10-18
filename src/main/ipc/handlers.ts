@@ -47,6 +47,7 @@ import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
 import { listImportableSessions, importSession, restoreLegacyHistory, type ImportRequest } from '../session/import'
 import { forkTask } from '../session/fork'
+import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
 function worktreeIssueText(issue?: string): string {
@@ -252,6 +253,10 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle('chat:live', (_, taskId: string) => getLiveState(taskId))
   ipcMain.handle('chat:peek', (_, taskId: string) => peekTask(taskId))
+  ipcMain.handle('chat:suggestFiles', (_, { taskId, query }: { taskId: string; query: string }) => {
+    const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
+    return task ? suggestFiles(task.worktree_path || task.project_path, query) : []
+  })
   ipcMain.handle('chat:attachment', (_, { taskId, id }: { taskId: string; id: string }) => readAttachment(taskId, id))
 
   // --- Sidecar console (plain shell in the task's worktree, no agent logic) ---

@@ -117,6 +117,8 @@ const api = {
     fork: (taskId: string, turnId: string) => ipcRenderer.invoke('chat:fork', { taskId, turnId }),
     /** Commands and context for a chat without a live session, read without running a turn. */
     peek: (taskId: string) => ipcRenderer.invoke('chat:peek', taskId),
+    /** Worktree files matching what follows `@` in the composer. */
+    suggestFiles: (taskId: string, query: string): Promise<string[]> => ipcRenderer.invoke('chat:suggestFiles', { taskId, query }),
     /** A notification was clicked: the main process asks to show this task. */
     onSelectTask: (callback: (taskId: string) => void) => {
       const listener = (_: Electron.IpcRendererEvent, taskId: string) => callback(taskId)

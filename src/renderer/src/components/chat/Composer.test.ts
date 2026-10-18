@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchCommands } from './Composer'
+import { matchCommands, mentionAt } from './Composer'
 
 const cmds = ['postman:api-testing', 'compact', 'review', 'postman:compare', 'clear', 'my-plugin:commit'].map((name) => ({ name }))
 
@@ -11,5 +11,17 @@ describe('matchCommands', () => {
   it('ranks prefix matches, then plugin commands by their own name, then substrings', () => {
     expect(matchCommands(cmds, 'com').map((c) => c.name)).toEqual(['compact', 'postman:compare', 'my-plugin:commit'])
     expect(matchCommands(cmds, 'view').map((c) => c.name)).toEqual(['review'])
+  })
+})
+
+describe('mentionAt', () => {
+  it('finds the @mention being typed before the caret', () => {
+    expect(mentionAt('look at @src/ma', 15)).toEqual({ query: 'src/ma', start: 8 })
+    expect(mentionAt('@', 1)).toEqual({ query: '', start: 0 })
+  })
+
+  it('ignores e-mail addresses and finished mentions', () => {
+    expect(mentionAt('mail me@host', 12)).toBeNull()
+    expect(mentionAt('see @a.ts and', 13)).toBeNull()
   })
 })
