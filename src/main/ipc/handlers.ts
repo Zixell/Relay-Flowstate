@@ -42,7 +42,8 @@ import {
   getLiveState,
   peekTask,
   switchAgent,
-  disposeSession
+  disposeSession,
+  recapTask
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
@@ -199,6 +200,8 @@ export function registerIpcHandlers(): void {
     const rows = getTaskSummaries(taskId)
     return rows.map((r) => ({ ...JSON.parse(r.summary_json), _created_at: r.created_at }))
   })
+
+  ipcMain.handle('tasks:recap', (_, taskId: string) => recapTask(taskId))
 
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {

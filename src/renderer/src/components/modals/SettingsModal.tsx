@@ -139,9 +139,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             </div>
             <div className="flex flex-col gap-2">
               {[
-                'Written after each finished turn of a chat task',
+                'Written only when you press Recap in a task',
                 'Runs the agent CLI headlessly in the background (no terminal window)',
-                'One summary per task — updated incrementally after each session',
+                'One recap per task — each one builds on the previous',
                 anySummaryAgent
                   ? 'Falls back to a git-based summary if the CLI call fails'
                   : 'No agent CLI detected — summaries fall back to git history'

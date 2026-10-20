@@ -58,6 +58,8 @@ const api = {
       ipcRenderer.invoke('tasks:updateSummary', data),
     getEvents: (taskId: string) => ipcRenderer.invoke('tasks:getEvents', taskId),
     getSummaries: (taskId: string) => ipcRenderer.invoke('tasks:getSummaries', taskId),
+    /** Writes the task's recap now; the result arrives through `onSummary`. */
+    recap: (taskId: string): Promise<void> => ipcRenderer.invoke('tasks:recap', taskId),
     onEvent: (taskId: string, callback: (event: unknown) => void) => {
       const listener = (_: Electron.IpcRendererEvent, event: unknown) => callback(event)
       ipcRenderer.on(`tasks:event:${taskId}`, listener)

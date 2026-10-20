@@ -351,53 +351,54 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   } catch (err) {
     console.warn('[relay] could not count changed files:', err)
   }
-
-  if (e.reason === 'end_turn' || e.reason === 'max_tokens') void summarize(taskId, e.turnId)
-}
-
-/** Updates the task summary from the turn's transcript instead of terminal output. */
-async function summarize(taskId: string, turnId: string): Promise<void> {
-  try {
-    const task = loadTask(taskId)
-    const turnMessages = getMessages(taskId, { limit: 2000 }).filter((m) => m.turn_id === turnId || (m.role === 'user' && !m.turn_id))
-    const userPrompts = getMessages(taskId, { limit: 50 })
-      .filter((m) => m.role === 'user' && m.kind === 'text' && m.content)
-      .slice(-5)
-      .map((m) => m.content as string)
-    const transcript = turnMessages
-      .map((m) => {
-        if (m.kind === 'text') return `${m.role}: ${m.content}`
-        if (m.kind === 'tool_call') {
-          const c = JSON.parse(m.content ?? '{}')
-          return `tool ${c.name}: ${c.title} [${m.tool_status}]`
-        }
-        return ''
-      })
-      .filter(Boolean)
-      .join('\n')
-
-    const rows = getTaskSummaries(taskId)
-    const existing = rows.length ? (JSON.parse(rows[rows.length - 1].summary_json) as { text?: string }) : null
-    const meta = task.metadata ? JSON.parse(task.metadata) : {}
-
-    const summary = await generateSessionSummary({
-      taskId,
-      agentId: task.process_type,
-      userPrompts,
-      cwd: task.worktree_path || task.project_path,
-      startCommit: meta.startCommit,
-      status: 'completed',
-      agentOutput: transcript,
-      existingSummaryText: existing?.text
-    })
-    appendTaskSummary(taskId, JSON.stringify(summary))
-    send(`task:summary:${taskId}`, JSON.stringify([summary]))
-  } catch (err) {
-    console.warn('[relay] chat summary failed:', err)
-  }
 }
 
 // --- Public API (used by IPC handlers) --------------------------------------
+
+/**
+ * Writes the task's recap on request: the previous recap plus whatever was said
+ * since. Runs a headless agent call, so it is never triggered automatically.
+ */
+export async function recapTask(taskId: string): Promise<void> {
+  const task = loadTask(taskId)
+  const rows = getTaskSummaries(taskId)
+  const last = rows.length ? rows[rows.length - 1] : null
+  const existing = last ? (JSON.parse(last.summary_json) as { text?: string }) : null
+  // Recaps are stamped in seconds, messages in milliseconds.
+  const since = last && existing?.text ? last.created_at * 1000 : 0
+  const newMessages = getMessages(taskId, { limit: 2000 }).filter((m) => m.created_at >= since)
+  if (since && !newMessages.some((m) => m.kind === 'text' && m.content)) return
+
+  const userPrompts = newMessages
+    .filter((m) => m.role === 'user' && m.kind === 'text' && m.content)
+    .slice(-5)
+    .map((m) => m.content as string)
+  const transcript = newMessages
+    .map((m) => {
+      if (m.kind === 'text') return `${m.role}: ${m.content}`
+      if (m.kind === 'tool_call') {
+        const c = JSON.parse(m.content ?? '{}')
+        return `tool ${c.name}: ${c.title} [${m.tool_status}]`
+      }
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+  const meta = task.metadata ? JSON.parse(task.metadata) : {}
+
+  const summary = await generateSessionSummary({
+    taskId,
+    agentId: task.process_type,
+    userPrompts,
+    cwd: task.worktree_path || task.project_path,
+    startCommit: meta.startCommit,
+    status: 'completed',
+    agentOutput: transcript,
+    existingSummaryText: existing?.text
+  })
+  appendTaskSummary(taskId, JSON.stringify(summary))
+  send(`task:summary:${taskId}`, JSON.stringify([summary]))
+}
 
 export async function sendMessage(taskId: string, input: UserInput): Promise<MessageRow | undefined> {
   const s = await ensureSession(taskId)

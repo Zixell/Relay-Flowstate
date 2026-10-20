@@ -15,7 +15,8 @@ import {
   GitMerge,
   XCircle,
   Copy,
-  Check
+  Check,
+  Sparkles
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
 import { STATUS_CONFIG, type Task } from '../../types'
@@ -42,6 +43,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const [notes, setNotes] = useState(task.notes ?? '')
   const [notesSaved, setNotesSaved] = useState(false)
   const [summaries, setSummaries] = useState<SessionSummaryEntry[]>([])
+  const [recapping, setRecapping] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
   const [mergeState, setMergeState] = useState<'idle' | 'merging' | 'success' | 'error'>('idle')
   const [mergeError, setMergeError] = useState<string | null>(null)
@@ -61,6 +63,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
   // Load full summary history when task changes
   useEffect(() => {
     setSummaries([])
+    setRecapping(false)
     if (!isElectron) return
     window.api.tasks.getSummaries(task.id).then((list: SessionSummaryEntry[]) => {
       if (list?.length) setSummaries(list)
@@ -93,6 +96,18 @@ export function TaskDetail({ task }: TaskDetailProps) {
     })
     return unsub
   }, [task.id, updateTask])
+
+  const handleRecap = useCallback(async () => {
+    if (!isElectron) return
+    setRecapping(true)
+    try {
+      await window.api.tasks.recap(task.id)
+    } catch (err) {
+      console.warn('[relay] recap failed:', err)
+    } finally {
+      setRecapping(false)
+    }
+  }, [task.id])
 
   const handleMerge = useCallback(async () => {
     if (!isElectron || !task.branch || !task.worktree_path) return
@@ -276,7 +291,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
             { id: 'timeline', label: 'Timeline' },
             { id: 'files', label: `Files (${task.changed_files_count})` },
             { id: 'notes', label: 'Notes' },
-            { id: 'summary', label: 'Summary' }
+            { id: 'summary', label: 'Recap' }
           ] as { id: DetailTab; label: string }[]
         ).map((tab) => (
           <button
@@ -346,7 +361,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
 
         {activeTab === 'summary' && (
           <div className="h-full overflow-y-auto px-6 py-4">
-            <SessionSummaryList summaries={summaries} />
+            <SessionSummaryList summaries={summaries} recapping={recapping} onRecap={handleRecap} />
           </div>
         )}
       </div>
@@ -423,15 +438,32 @@ interface SessionSummaryEntry {
   status: 'completed' | 'waiting'
 }
 
-function SessionSummaryList({ summaries }: { summaries: SessionSummaryEntry[] }) {
+function RecapButton({ recapping, onRecap }: { recapping: boolean; onRecap: () => void }) {
+  return (
+    <Button variant="outline" size="sm" className="text-xs h-8 gap-1.5" disabled={recapping} onClick={onRecap}>
+      {recapping ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+      {recapping ? 'Writing recap…' : 'Recap'}
+    </Button>
+  )
+}
+
+function SessionSummaryList({
+  summaries,
+  recapping,
+  onRecap
+}: {
+  summaries: SessionSummaryEntry[]
+  recapping: boolean
+  onRecap: () => void
+}) {
   const [copied, setCopied] = useState(false)
 
   if (!summaries.length) {
     return (
-      <div className="flex flex-col items-center justify-center h-48 gap-2 text-zinc-600">
+      <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-600">
         <CheckCircle2 className="w-6 h-6 opacity-30" />
-        <p className="text-xs">No summary yet — written automatically after each finished turn</p>
-        <p className="text-[11px] text-zinc-700">Requires an agent CLI (Claude Code or Codex) to be installed</p>
+        <p className="text-xs">No recap yet — the agent writes one when you ask for it</p>
+        <RecapButton recapping={recapping} onRecap={onRecap} />
       </div>
     )
   }
@@ -452,6 +484,9 @@ function SessionSummaryList({ summaries }: { summaries: SessionSummaryEntry[] })
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex justify-end">
+        <RecapButton recapping={recapping} onRecap={onRecap} />
+      </div>
       <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 flex flex-col gap-4">
         {/* Header */}
         <div className="flex items-center gap-2">
@@ -464,7 +499,7 @@ function SessionSummaryList({ summaries }: { summaries: SessionSummaryEntry[] })
           <span className="text-[11px] text-zinc-600 ml-auto">{date}</span>
           <button
             onClick={handleCopy}
-            title="Copy summary"
+            title="Copy recap"
             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06] transition-colors"
           >
             {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
