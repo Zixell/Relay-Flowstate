@@ -26,8 +26,9 @@ import {
   commitStaged,
   pushOrigin,
   mergeBranch,
-  ensureBranchExists,
-  commitAllAndMerge
+  commitAllAndMerge,
+  currentBranch,
+  branchesContaining
 } from '../git'
 import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
@@ -58,6 +59,21 @@ function worktreeIssueText(issue?: string): string {
   return issue || 'worktree could not be created'
 }
 
+/**
+ * The branch a task's worktree came from, which a new merge target is created from.
+ * Tasks from before it was recorded get the likeliest branch that contains their start commit.
+ */
+function taskSourceBranch(task: { project_path: string; branch?: string | null; metadata: string | null }): string | undefined {
+  let meta: { sourceBranch?: string; startCommit?: string } = {}
+  try { meta = task.metadata ? JSON.parse(task.metadata) : {} } catch { /* none recorded */ }
+  const local = getLocalBranches(task.project_path).filter((b) => !b.startsWith('relay/task-'))
+  if (meta.sourceBranch && local.includes(meta.sourceBranch)) return meta.sourceBranch
+  if (!meta.startCommit) return undefined
+  const containing = branchesContaining(task.project_path, meta.startCommit).filter((b) => local.includes(b))
+  const preferred = [task.branch, currentBranch(task.project_path), 'main', 'master', 'develop']
+  return preferred.find((b) => b && containing.includes(b)) ?? containing[0]
+}
+
 function emitTaskEvent(event: { id: string; task_id: string; type: string; content: string; metadata: string | null; timestamp?: number }): void {
   const win = BrowserWindow.getAllWindows()[0]
   if (win) {
@@ -83,7 +99,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:getById', (_, id: string) => getTaskById(id))
   ipcMain.handle(
     'tasks:create',
-    (_, { projectId, title, prompt, processType, branch, cwd, model, mode }) => {
+    (_, { projectId, title, prompt, processType, worktree = true, cwd, model, mode }) => {
       // Fail before creating a worktree for an agent that cannot run.
       const agent = getAgent(processType)
       if (!agent.chat) throw new Error(`${agent.label} is not supported`)
@@ -93,13 +109,16 @@ export function registerIpcHandlers(): void {
       // in parallel without branch-switching conflicts in the main checkout.
       let worktreePath = ''
       let branchCreated = false
+      // The project's branch the worktree starts from; a new merge target is created from it
+      let sourceBranch: string | undefined
       // Recorded on the task so the UI can say why it is not isolated.
       let worktreeIssue: string | undefined
-      if (cwd) {
+      if (cwd && worktree) {
         worktreeIssue = checkWorktreeSupport(cwd) ?? undefined
         if (!worktreeIssue) {
           try {
-            // branch is the merge TARGET — always auto-create the task's working branch
+            // The merge target is chosen later, when merging
+            sourceBranch = currentBranch(cwd)
             const result = addWorktree(cwd, id)
             worktreePath = result.worktreePath
             branchCreated = result.branchCreated
@@ -107,10 +126,6 @@ export function registerIpcHandlers(): void {
             console.warn('[relay] Worktree creation failed, running in project directory:', err)
             worktreeIssue = err instanceof Error ? err.message : String(err)
           }
-        }
-        // Ensure merge target branch exists in main repo (create from HEAD if missing)
-        if (branch) {
-          try { ensureBranchExists(cwd, branch) } catch { /* ignore */ }
         }
       }
 
@@ -128,9 +143,9 @@ export function registerIpcHandlers(): void {
         title,
         prompt,
         process_type: processType,
-        branch,
         worktree_path: worktreePath || undefined,
-        metadata: JSON.stringify({ startCommit, worktreeIssue }),
+        // worktree: false marks a deliberate opt-out, which needs no warning
+        metadata: JSON.stringify({ startCommit, sourceBranch, worktreeIssue, ...(worktree ? {} : { worktree: false }) }),
         transport,
         model,
         mode
@@ -150,21 +165,18 @@ export function registerIpcHandlers(): void {
           id: randomUUID(),
           task_id: id,
           type: 'system',
-          content: `No isolated worktree — the agent works directly in ${cwd} (${worktreeIssueText(worktreeIssue)})`
+          content: worktree
+            ? `No isolated worktree — the agent works directly in ${cwd} (${worktreeIssueText(worktreeIssue)})`
+            : `No worktree — the agent works directly in ${cwd}`
         })
       }
 
-      if (branch || worktreePath) {
-        const worktreeNote = worktreePath ? ` (worktree: ${worktreePath})` : ''
+      if (worktreePath) {
         insertTaskEvent({
           id: randomUUID(),
           task_id: id,
           type: 'system',
-          content: branchCreated
-            ? `Created branch: ${branch || `relay/task-${id.slice(0, 8)}`}${worktreeNote}`
-            : worktreePath
-              ? `Using branch: ${branch || 'current'}${worktreeNote}`
-              : `Switched to existing branch: ${branch}`
+          content: `${branchCreated ? 'Created' : 'Using'} branch: relay/task-${id.slice(0, 8)}${sourceBranch ? ` from ${sourceBranch}` : ''} (worktree: ${worktreePath})`
         })
       }
 
@@ -174,7 +186,7 @@ export function registerIpcHandlers(): void {
         BrowserWindow.getAllWindows()[0]?.webContents.send('task:status', { taskId: id, status: 'failed' })
       })
 
-      return { id, projectId, title, prompt, processType, branch, status: 'running', transport }
+      return { id, projectId, title, prompt, processType, status: 'running', transport }
     }
   )
 
@@ -202,6 +214,10 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('tasks:recap', (_, taskId: string) => recapTask(taskId))
+  ipcMain.handle('tasks:sourceBranch', (_, taskId: string) => {
+    const task = getTaskById(taskId) as { project_path: string; branch?: string | null; metadata: string | null } | null
+    return (task && taskSourceBranch(task)) ?? null
+  })
 
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {
@@ -355,7 +371,9 @@ export function registerIpcHandlers(): void {
       targetBranch: string
       commitMessage: string
     }) => {
-      const result = commitAllAndMerge(worktreeCwd, projectCwd, targetBranch, commitMessage)
+      // A new target branch comes off the branch the worktree was created from
+      const task = getTaskById(taskId) as { project_path: string; branch?: string | null; metadata: string | null } | null
+      const result = commitAllAndMerge(worktreeCwd, projectCwd, targetBranch, commitMessage, task ? taskSourceBranch(task) : undefined)
       if (result.success && result.commitHash) {
         const eventId = randomUUID()
         const content = JSON.stringify({ targetBranch, commit: result.commitHash })

@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   PauseCircle,
   GitMerge,
-  XCircle,
   Copy,
   Check,
   Sparkles
@@ -26,6 +25,7 @@ import { SidecarConsole } from './SidecarConsole'
 import { AgentPicker } from '../chat/AgentSwitch'
 import { ChatView } from '../chat/ChatView'
 import { WorktreeWarning } from './WorktreeWarning'
+import { MergeModal } from '../modals/MergeModal'
 import { TaskTimeline } from './TaskTimeline'
 import { FileChanges } from './FileChanges'
 import { useAppStore } from '../../stores/appStore'
@@ -38,6 +38,14 @@ interface TaskDetailProps {
 
 type DetailTab = 'chat' | 'console' | 'timeline' | 'files' | 'notes' | 'summary'
 
+function worktreeOptedOut(task: Task): boolean {
+  try {
+    return task.metadata ? JSON.parse(task.metadata).worktree === false : false
+  } catch {
+    return false
+  }
+}
+
 export function TaskDetail({ task }: TaskDetailProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('chat')
   const [notes, setNotes] = useState(task.notes ?? '')
@@ -45,8 +53,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
   const [summaries, setSummaries] = useState<SessionSummaryEntry[]>([])
   const [recapping, setRecapping] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
-  const [mergeState, setMergeState] = useState<'idle' | 'merging' | 'success' | 'error'>('idle')
-  const [mergeError, setMergeError] = useState<string | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [merged, setMerged] = useState(false)
   const selectTask = useAppStore((s) => s.selectTask)
   const updateTask = useAppStore((s) => s.updateTask)
 
@@ -109,26 +117,10 @@ export function TaskDetail({ task }: TaskDetailProps) {
     }
   }, [task.id])
 
-  const handleMerge = useCallback(async () => {
-    if (!isElectron || !task.branch || !task.worktree_path) return
-    setMergeState('merging')
-    setMergeError(null)
-    try {
-      const stripped = task.branch.replace(/^(feature|feat|fix|bugfix|hotfix|chore|refactor|docs|test|style|perf)\//, '')
-      const commitMessage = `${stripped}: ${task.title}`
-      const res = await window.api.git.commitAndMerge(task.id, task.worktree_path, task.project_path, task.branch, commitMessage)
-      if (res.success) {
-        setMergeState('success')
-        setTimeout(() => setMergeState('idle'), 3000)
-      } else {
-        setMergeState('error')
-        setMergeError(res.stderr || 'Merge failed')
-      }
-    } catch (err) {
-      setMergeState('error')
-      setMergeError(String(err))
-    }
-  }, [task.branch, task.worktree_path, task.project_path, task.title])
+  const handleMerged = useCallback(() => {
+    setMerged(true)
+    setTimeout(() => setMerged(false), 3000)
+  }, [])
 
   const handleStop = useCallback(async () => {
     if (!isElectron) return
@@ -223,28 +215,18 @@ export function TaskDetail({ task }: TaskDetailProps) {
                   Respond to Agent
                 </Button>
               )}
-              {task.branch && task.worktree_path && (
+              {isElectron && task.worktree_path && (
                 <button
-                  onClick={handleMerge}
-                  disabled={mergeState === 'merging'}
+                  onClick={() => setMergeOpen(true)}
                   className={cn(
                     'flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-medium border transition-colors',
-                    mergeState === 'idle' && 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/50',
-                    mergeState === 'merging' && 'border-white/[0.06] text-zinc-500 cursor-not-allowed',
-                    mergeState === 'success' && 'border-emerald-500/30 text-emerald-400',
-                    mergeState === 'error' && 'border-red-500/30 text-red-400 hover:bg-red-500/10'
+                    merged
+                      ? 'border-emerald-500/30 text-emerald-400'
+                      : 'border-blue-500/30 text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/50'
                   )}
                 >
-                  {mergeState === 'merging' && <Loader2 className="w-3 h-3 animate-spin" />}
-                  {mergeState === 'success' && <CheckCircle2 className="w-3 h-3" />}
-                  {mergeState === 'error' && <XCircle className="w-3 h-3" />}
-                  {mergeState === 'idle' && <GitMerge className="w-3 h-3" />}
-                  <span>
-                    {mergeState === 'merging' ? 'Merging…' :
-                     mergeState === 'success' ? 'Merged!' :
-                     mergeState === 'error' ? 'Failed' :
-                     `Merge to ${task.branch}`}
-                  </span>
+                  {merged ? <CheckCircle2 className="w-3 h-3" /> : <GitMerge className="w-3 h-3" />}
+                  <span>{merged ? 'Merged!' : 'Merge'}</span>
                 </button>
               )}
             </div>
@@ -262,8 +244,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
         </div>
       </div>
 
-      {/* Not isolated: the agent edits the user's own checkout */}
-      {!task.worktree_path && (
+      {/* Not isolated: the agent edits the user's own checkout. No warning when that was the user's choice. */}
+      {!task.worktree_path && !worktreeOptedOut(task) && (
         <div className="px-6 py-2 border-b border-white/[0.05] shrink-0">
           <WorktreeWarning
             compact
@@ -274,13 +256,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
         </div>
       )}
 
-      {/* Merge error */}
-      {mergeState === 'error' && mergeError && (
-        <div className="flex items-start gap-2 px-6 py-2 bg-red-400/[0.06] border-b border-red-400/20 text-[11px] text-red-400 shrink-0">
-          <XCircle className="w-3 h-3 shrink-0 mt-0.5" />
-          <span className="font-mono break-all">{mergeError}</span>
-        </div>
-      )}
+      {mergeOpen && <MergeModal task={task} open={mergeOpen} onClose={() => setMergeOpen(false)} onMerged={handleMerged} />}
 
       {/* Tabs */}
       <div className="flex items-center gap-0 px-6 border-b border-white/[0.06] bg-[#0d0d0d] shrink-0">

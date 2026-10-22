@@ -2,7 +2,6 @@ import { app } from 'electron'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { basename, join } from 'path'
-import { spawnSync } from 'child_process'
 import type { AgentEvent, ExternalSessionInfo, HistoryEntry, PlanItem } from '../agents/adapter'
 import { describeAgents, getAgent, isAgentAvailable } from '../agents'
 import {
@@ -19,7 +18,7 @@ import {
   upsertProject
 } from '../db'
 import { addWorktree, checkWorktreeSupport } from '../git/worktree'
-import { getCurrentCommit } from '../git'
+import { currentBranch, getCurrentCommit } from '../git'
 import { saveAttachment } from './attachments'
 import { persistEvent } from './manager'
 
@@ -40,12 +39,6 @@ export interface ImportRequest {
   title: string
   /** Continue in a new worktree on a fork of the session instead of in place. */
   worktree: boolean
-}
-
-function currentBranch(cwd: string): string | undefined {
-  const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd, encoding: 'utf8', timeout: 5000 })
-  const branch = r.status === 0 ? r.stdout.trim() : ''
-  return branch && branch !== 'HEAD' ? branch : undefined
 }
 
 /** Sessions run with the agents' own CLIs, newest first. Sessions the app itself started are left out. */
@@ -201,7 +194,11 @@ export async function importSession(req: ImportRequest): Promise<unknown> {
     process_type: agent.id,
     branch: req.worktree ? currentBranch(req.cwd) : undefined,
     worktree_path: worktreePath,
-    metadata: JSON.stringify({ startCommit: getCurrentCommit(cwd), importedFrom: { agent: agent.id, sessionId: req.sessionId } }),
+    metadata: JSON.stringify({
+      startCommit: getCurrentCommit(cwd),
+      sourceBranch: req.worktree ? currentBranch(req.cwd) : undefined,
+      importedFrom: { agent: agent.id, sessionId: req.sessionId }
+    }),
     transport: 'chat'
   })
   updateTaskAgentSessionId(taskId, resumeId)

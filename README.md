@@ -39,8 +39,8 @@ Agents whose CLI isn't on your PATH are shown as *not installed*. Sign in with e
 - Follow-ups while a turn runs are added to it (Claude, Codex) or queued (ACP agents).
 
 ### Worktrees and git
-- Each task gets a worktree and branch (`relay/task-…`); tasks run in parallel.
-- The Files tab shows everything the task changed, including new files; **Merge** commits and merges into the target branch.
+- With **Use worktree** on (the default), each task gets a worktree and branch (`relay/task-…`) off the project's current branch, so tasks run in parallel; with it off, the agent works directly in the project folder.
+- The Files tab shows everything the task changed, including new files; **Merge** asks for the target branch — an existing local one, or a new one created from the branch the worktree came from — then commits the task and squashes it into that branch.
 - A plain **Console** tab opens a shell in the task's worktree — for your convenience only; nothing typed there reaches the agent.
 - Projects without git (or without commits) still work, with a warning that the agent edits the folder directly.
 

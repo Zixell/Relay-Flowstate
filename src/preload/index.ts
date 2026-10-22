@@ -41,7 +41,8 @@ const api = {
       title: string
       prompt: string
       processType: string
-      branch?: string
+      /** false runs the agent directly in the project folder. Defaults to true. */
+      worktree?: boolean
       cwd?: string
       model?: string
       mode?: string
@@ -58,6 +59,8 @@ const api = {
       ipcRenderer.invoke('tasks:updateSummary', data),
     getEvents: (taskId: string) => ipcRenderer.invoke('tasks:getEvents', taskId),
     getSummaries: (taskId: string) => ipcRenderer.invoke('tasks:getSummaries', taskId),
+    /** The branch the task's worktree came from; a new merge target is created from it. */
+    sourceBranch: (taskId: string): Promise<string | null> => ipcRenderer.invoke('tasks:sourceBranch', taskId),
     /** Writes the task's recap now; the result arrives through `onSummary`. */
     recap: (taskId: string): Promise<void> => ipcRenderer.invoke('tasks:recap', taskId),
     onEvent: (taskId: string, callback: (event: unknown) => void) => {
@@ -107,6 +110,7 @@ const api = {
       ipcRenderer.invoke('git:commit', { cwd, message }),
     push: (cwd: string, branch?: string) => ipcRenderer.invoke('git:push', { cwd, branch }),
     merge: (cwd: string, branch: string, targetBranch?: string) => ipcRenderer.invoke('git:merge', { cwd, branch, targetBranch }),
+    /** A targetBranch that does not exist yet is created from the branch the task's worktree came from. */
     commitAndMerge: (taskId: string, worktreeCwd: string, projectCwd: string, targetBranch: string, commitMessage: string) =>
       ipcRenderer.invoke('git:commitAndMerge', { taskId, worktreeCwd, projectCwd, targetBranch, commitMessage })
   },

@@ -177,7 +177,8 @@ export interface GitWorkingStatus {
 export function getLocalBranches(cwd: string): string[] {
   const isRepo = run('git rev-parse --is-inside-work-tree', cwd)
   if (isRepo !== 'true') return []
-  const output = run('git branch --format=%(refname:short)', cwd)
+  // No shell: it would choke on the parentheses in the format
+  const output = git(['branch', '--format=%(refname:short)'], cwd).stdout
   return output.split('\n').map((b) => b.trim()).filter(Boolean)
 }
 
@@ -254,20 +255,40 @@ export function mergeBranch(cwd: string, branch: string, targetBranch?: string):
   return { success: commit.success, stderr: commit.stderr, stdout: commit.stdout }
 }
 
-export function ensureBranchExists(cwd: string, branch: string): void {
-  const exists = git(['rev-parse', '--verify', branch], cwd).success
-  if (!exists) {
-    git(['branch', branch], cwd)
-  }
+/** Local branches whose history includes commit. */
+export function branchesContaining(cwd: string, commit: string): string[] {
+  return git(['branch', '--contains', commit, '--format=%(refname:short)'], cwd).stdout.split('\n').map((b) => b.trim()).filter(Boolean)
 }
 
-/** Stage all changes, commit if anything staged, then merge worktree branch into targetBranch in main repo. */
+/** The branch checked out in cwd; undefined when HEAD is detached or cwd is not a repository. */
+export function currentBranch(cwd: string): string | undefined {
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).stdout
+  return branch && branch !== 'HEAD' ? branch : undefined
+}
+
+/**
+ * Stage all changes, commit if anything staged, then squash-merge worktree branch into targetBranch in main repo.
+ * A targetBranch that does not exist yet is created from base (a branch or commit). On failure the
+ * project folder is put back on the branch it was on.
+ */
 export function commitAllAndMerge(
   worktreeCwd: string,
   projectCwd: string,
   targetBranch: string,
-  commitMessage: string
+  commitMessage: string,
+  base?: string
 ): { success: boolean; stderr: string; committed: boolean; commitHash?: string } {
+  // Check the branches before touching the worktree
+  const targetExists = git(['rev-parse', '--verify', '--quiet', `refs/heads/${targetBranch}`], projectCwd).success
+  if (!targetExists) {
+    if (!git(['check-ref-format', '--branch', targetBranch], projectCwd).success) {
+      return { success: false, stderr: `"${targetBranch}" is not a valid branch name`, committed: false }
+    }
+    if (!base || !git(['rev-parse', '--verify', '--quiet', `${base}^{commit}`], projectCwd).success) {
+      return { success: false, stderr: `Branch ${targetBranch} does not exist and there is no branch to create it from`, committed: false }
+    }
+  }
+
   // Stage everything in worktree
   const stageResult = git(['add', '-A'], worktreeCwd)
   if (!stageResult.success) {
@@ -292,8 +313,14 @@ export function commitAllAndMerge(
     return { success: false, stderr: 'Could not determine task branch', committed }
   }
 
-  // Checkout target branch in main repo
-  const checkoutResult = git(['checkout', targetBranch], projectCwd)
+  const previousBranch = currentBranch(projectCwd)
+  const restore = (): void => {
+    if (previousBranch) git(['checkout', previousBranch], projectCwd)
+    if (!targetExists) git(['branch', '-D', targetBranch], projectCwd)
+  }
+
+  // Checkout target branch in main repo, creating it if needed
+  const checkoutResult = git(targetExists ? ['checkout', targetBranch] : ['checkout', '-b', targetBranch, base!], projectCwd)
   if (!checkoutResult.success) {
     return { success: false, stderr: `Checkout ${targetBranch} failed: ${checkoutResult.stderr}`, committed }
   }
@@ -301,9 +328,21 @@ export function commitAllAndMerge(
   // Squash all task-branch commits into a single staged diff (no merge commit)
   const squashResult = git(['merge', '--squash', taskBranch], projectCwd)
   if (!squashResult.success) {
-    return { success: false, stderr: squashResult.stderr, committed }
+    const conflicts = git(['diff', '--name-only', '--diff-filter=U'], projectCwd).stdout.split('\n').filter(Boolean)
+    git(['reset', '--merge'], projectCwd)
+    restore()
+    return {
+      success: false,
+      stderr: conflicts.length
+        ? `The task's changes conflict with ${targetBranch} in: ${conflicts.join(', ')}. Nothing was changed.`
+        : /unrelated histories/.test(squashResult.stderr)
+          ? `${targetBranch} shares no history with the task's branch, so it cannot be merged there`
+          : squashResult.stderr,
+      committed
+    }
   }
   if (squashResult.stdout.includes('Already up to date')) {
+    restore()
     return { success: false, stderr: 'Nothing to merge — no new commits on task branch', committed }
   }
 

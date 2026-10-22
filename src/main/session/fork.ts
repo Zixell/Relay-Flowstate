@@ -14,7 +14,7 @@ import {
 } from '../db'
 import { addWorktree, checkWorktreeSupport } from '../git/worktree'
 import { restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
-import { getCurrentCommit } from '../git'
+import { currentBranch, getCurrentCommit } from '../git'
 import { readAttachment, saveAttachment } from './attachments'
 import { readHandoff } from './handoff'
 
@@ -69,6 +69,7 @@ export async function forkTask(taskId: string, turnId: string): Promise<unknown>
   const sessionId = await history.fork(task.agent_session_id, sourceCwd, isLast ? undefined : turn.checkpoint ?? undefined)
 
   const newId = randomUUID()
+  const sourceBranch = currentBranch(task.project_path)
   const { worktreePath } = addWorktree(task.project_path, newId)
   const base = snapshotWorkingTree(worktreePath, newId, 'fork-base')
   if (!base || !restoreSnapshot(worktreePath, turn.commit_after, base)) {
@@ -84,7 +85,7 @@ export async function forkTask(taskId: string, turnId: string): Promise<unknown>
     process_type: task.process_type,
     branch: task.branch ?? undefined,
     worktree_path: worktreePath,
-    metadata: JSON.stringify({ startCommit: getCurrentCommit(worktreePath), forkedFrom: { taskId, turnId } }),
+    metadata: JSON.stringify({ startCommit: getCurrentCommit(worktreePath), sourceBranch, forkedFrom: { taskId, turnId } }),
     transport: 'chat',
     model: task.model ?? undefined,
     mode: task.mode ?? undefined
