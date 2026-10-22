@@ -419,7 +419,7 @@ export function ChatView({ task }: Props) {
     <div className="flex flex-col h-full">
       {viewerSrc && <ImageViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-6 py-6">
+        <div className="max-w-3xl mx-auto px-6 py-6 selectable">
           {loading && (
             <div className="flex justify-center py-10">
               <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />

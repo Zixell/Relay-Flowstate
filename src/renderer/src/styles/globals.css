@@ -78,14 +78,23 @@
     -webkit-user-select: none;
   }
 
-  /* Allow text selection in content areas */
+  /* Allow text selection in content areas. `*` above hits every element,
+     so .selectable has to re-enable its descendants too. */
   textarea,
   input,
   pre,
   code,
-  .selectable {
+  .selectable,
+  .selectable * {
     user-select: text;
     -webkit-user-select: text;
+  }
+
+  /* Button labels stay out of copied text */
+  .selectable button,
+  .selectable button * {
+    user-select: none;
+    -webkit-user-select: none;
   }
 }
 
