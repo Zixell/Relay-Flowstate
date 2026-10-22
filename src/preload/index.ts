@@ -55,6 +55,7 @@ const api = {
     }) => ipcRenderer.invoke('tasks:updateStatus', data),
     updateNotes: (data: { id: string; notes: string }) =>
       ipcRenderer.invoke('tasks:updateNotes', data),
+    setStarred: (id: string, starred: boolean) => ipcRenderer.invoke('tasks:setStarred', { id, starred }),
     updateSummary: (data: { id: string; summary: string }) =>
       ipcRenderer.invoke('tasks:updateSummary', data),
     getEvents: (taskId: string) => ipcRenderer.invoke('tasks:getEvents', taskId),

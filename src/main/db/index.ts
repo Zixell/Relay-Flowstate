@@ -110,6 +110,8 @@ function createSchema(db: Database.Database): void {
   try { db.exec('ALTER TABLE tasks ADD COLUMN mode TEXT') } catch { /* already exists */ }
   // The agent's latest plan (todo list), so it survives a restart.
   try { db.exec('ALTER TABLE tasks ADD COLUMN plan_json TEXT') } catch { /* already exists */ }
+  // Starred tasks are pinned to the top of the sidebar.
+  try { db.exec('ALTER TABLE tasks ADD COLUMN starred INTEGER NOT NULL DEFAULT 0') } catch { /* already exists */ }
   try { db.exec('ALTER TABLE messages ADD COLUMN attachments TEXT') } catch { /* already exists or table not created yet */ }
   db.exec(`
     CREATE TABLE IF NOT EXISTS turns (
@@ -264,6 +266,12 @@ export function updateTaskStatus(
 export function updateTaskAgentSessionId(id: string, agentSessionId: string) {
   if (!db) return
   db.prepare('UPDATE tasks SET agent_session_id = ?, updated_at = unixepoch() WHERE id = ?').run(agentSessionId, id)
+}
+
+/** Leaves updated_at alone: starring is not activity on the task. */
+export function setTaskStarred(id: string, starred: boolean) {
+  if (!db) return
+  db.prepare('UPDATE tasks SET starred = ? WHERE id = ?').run(starred ? 1 : 0, id)
 }
 
 export function updateTaskNotes(id: string, notes: string) {

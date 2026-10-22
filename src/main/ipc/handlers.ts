@@ -12,6 +12,7 @@ import {
   insertTaskEvent,
   updateTaskStatus,
   updateTaskNotes,
+  setTaskStarred,
   appendTaskSummary,
   deleteTask
 } from '../db'
@@ -195,6 +196,11 @@ export function registerIpcHandlers(): void {
       runtime_seconds: runtimeSeconds,
       changed_files_count: changedFilesCount
     })
+    return { success: true }
+  })
+
+  ipcMain.handle('tasks:setStarred', (_, { id, starred }: { id: string; starred: boolean }) => {
+    setTaskStarred(id, starred)
     return { success: true }
   })
 

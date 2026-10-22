@@ -69,6 +69,8 @@ export interface Task {
   changed_files_count: number
   notes?: string
   summary?: string
+  /** 1 when pinned to the top of the sidebar (SQLite has no booleans). */
+  starred?: number
   metadata?: string
   /** The agent's own session handle, used to resume the conversation. */
   agent_session_id?: string
