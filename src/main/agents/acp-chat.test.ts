@@ -12,7 +12,7 @@ const chat = createAcpChat({
   loginHint: 'Sign in.'
 })
 const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'relay-acp-')))
-const ctx = { taskId: 't', cwd, getBool: () => false }
+const ctx = { taskId: 't', cwd, getSetting: () => '' }
 
 function run(session: ReturnType<typeof chat.createSession>, respond: string) {
   const events: AgentEvent[] = []

@@ -1,5 +1,5 @@
 import type { AgentDefinition } from './types'
-import { claudeChat, SKIP_PERMISSIONS } from './claude-chat'
+import { claudeChat, DEFAULT_MODE, MODE_OPTIONS } from './claude-chat'
 
 /**
  * Anthropic's Claude Code, driven through the Claude Agent SDK with the
@@ -37,12 +37,13 @@ export const claudeCodeAgent: AgentDefinition = {
 
   settings: [
     {
-      key: SKIP_PERMISSIONS,
-      label: 'Skip permission prompts by default',
+      key: DEFAULT_MODE,
+      label: 'Default permission mode',
       description:
-        'New Claude sessions start in "Bypass permissions" mode. Turn off to start in "Ask before acting"; the mode can be changed per task under the composer.',
-      type: 'boolean',
-      default: true
+        'Mode new Claude sessions start in. "Auto" lets a classifier approve safe actions and asks only about risky ones, as in the CLI. The mode can be changed per task under the composer.',
+      type: 'select',
+      default: 'auto',
+      options: MODE_OPTIONS
     }
   ]
 }

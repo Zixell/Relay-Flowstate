@@ -7,6 +7,7 @@ import { disposeAllSessions } from './session/manager'
 import { closeAllConsoles } from './console/manager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { loadSettings } from './settings'
+import { migrateAgentSettings } from './agents'
 import { adoptLoginShellPath } from './shell-path'
 
 // Lets tests and parallel dev instances run against their own database and worktrees.
@@ -108,6 +109,7 @@ app.whenReady().then(() => {
     resetRunningTasks()
     resetRunningTurns()
     loadSettings()
+    migrateAgentSettings()
   } catch (err) {
     console.warn('[relay] DB init failed (native bindings not built?):', err)
   }

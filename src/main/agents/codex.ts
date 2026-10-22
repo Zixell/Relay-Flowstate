@@ -1,5 +1,5 @@
 import type { AgentDefinition } from './types'
-import { codexChat, CODEX_BYPASS_APPROVALS } from './codex-chat'
+import { codexChat, CODEX_DEFAULT_MODE, CODEX_MODE_OPTIONS } from './codex-chat'
 
 /**
  * Extracts the final assistant message from `codex exec --json` output.
@@ -70,12 +70,13 @@ export const codexAgent: AgentDefinition = {
 
   settings: [
     {
-      key: CODEX_BYPASS_APPROVALS,
-      label: 'Full access by default',
+      key: CODEX_DEFAULT_MODE,
+      label: 'Default permission mode',
       description:
-        'New Codex sessions start in "Full access" mode (no approvals, no sandbox). Turn off to start in "Auto (sandboxed)"; the mode can be changed per task under the composer.',
-      type: 'boolean',
-      default: true
+        'Mode new Codex sessions start in. "Full access" runs with no approvals and no sandbox. The mode can be changed per task under the composer.',
+      type: 'select',
+      default: 'full-access',
+      options: CODEX_MODE_OPTIONS
     }
   ]
 }

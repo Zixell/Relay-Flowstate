@@ -19,7 +19,7 @@ describe.runIf(process.env.RELAY_E2E && process.env.RELAY_ACP_BIN)('AcpAdapter (
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'relay-acp-e2e-')))
     execSync('git init -q', { cwd })
     const events: AgentEvent[] = []
-    const ctx = { taskId: 't', cwd, getBool: () => false }
+    const ctx = { taskId: 't', cwd, getSetting: () => '' }
 
     const session = chat.createSession(ctx)
     const done = new Promise<void>((resolve) =>

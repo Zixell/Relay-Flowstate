@@ -47,7 +47,10 @@ function claudeExecutable(): string | undefined {
 let sdkPromise: Promise<SdkModule> | null = null
 const loadSdk = (): Promise<SdkModule> => (sdkPromise ??= import('@anthropic-ai/claude-agent-sdk'))
 
-export const SKIP_PERMISSIONS = 'CLAUDE_SKIP_PERMISSIONS'
+/** Mode new sessions start in. */
+export const DEFAULT_MODE = 'CLAUDE_DEFAULT_MODE'
+/** Old boolean setting: true meant "start in Bypass permissions". */
+export const LEGACY_SKIP_PERMISSIONS = 'CLAUDE_SKIP_PERMISSIONS'
 
 const MODES: { id: PermissionMode; label: string }[] = [
   { id: 'default', label: 'Ask before acting' },
@@ -56,6 +59,8 @@ const MODES: { id: PermissionMode; label: string }[] = [
   { id: 'auto', label: 'Auto' },
   { id: 'bypassPermissions', label: 'Bypass permissions' }
 ]
+
+export const MODE_OPTIONS = MODES
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
   five_hour: '5-hour',
@@ -221,9 +226,13 @@ class ClaudeSession implements AgentSession {
     this.hub.emit(e)
   }
 
+  /**
+   * The task's own mode, else the default from settings. Passed explicitly:
+   * left out, the SDK starts in "default" (ask) unless settings say otherwise.
+   */
   private initialMode(): PermissionMode {
-    if (this.ctx.mode && MODES.some((m) => m.id === this.ctx.mode)) return this.ctx.mode as PermissionMode
-    return this.ctx.getBool(SKIP_PERMISSIONS, true) ? 'bypassPermissions' : 'default'
+    const mode = this.ctx.mode || this.ctx.getSetting(DEFAULT_MODE)
+    return MODES.find((m) => m.id === mode)?.id ?? 'auto'
   }
 
   async start(): Promise<void> {
@@ -550,7 +559,7 @@ const claudeHistory: SessionHistory = {
     const sdk = await loadSdk()
     const messages = await sdk.getSessionMessages(sessionId)
     const entries: HistoryEntry[] = []
-    const mapper = new ClaudeSession({ taskId: 'import', cwd, getBool: () => false })
+    const mapper = new ClaudeSession({ taskId: 'import', cwd, getSetting: () => '' })
     mapper.onEvent((event) => entries.push({ type: 'event', event }))
 
     for (const m of messages) {

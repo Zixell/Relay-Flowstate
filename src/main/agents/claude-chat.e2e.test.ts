@@ -12,7 +12,7 @@ describe.runIf(process.env.RELAY_E2E)('ClaudeAdapter (live)', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'relay-e2e-'))
     execSync('git init -q', { cwd })
     const events: AgentEvent[] = []
-    const ctx = { taskId: 't', cwd, mode: 'default', getBool: () => false }
+    const ctx = { taskId: 't', cwd, mode: 'default', getSetting: () => '' }
 
     const session = claudeChat.createSession(ctx)
     const done = new Promise<void>((resolve) =>

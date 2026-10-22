@@ -30,7 +30,10 @@ import { relativizer } from './paths'
  * turns and items. Schema: `codex app-server generate-ts`.
  */
 
-export const CODEX_BYPASS_APPROVALS = 'CODEX_BYPASS_APPROVALS'
+/** Mode new sessions start in. */
+export const CODEX_DEFAULT_MODE = 'CODEX_DEFAULT_MODE'
+/** Old boolean setting: false meant "start in Auto (sandboxed)". */
+export const LEGACY_CODEX_BYPASS_APPROVALS = 'CODEX_BYPASS_APPROVALS'
 
 type ApprovalPolicy = 'untrusted' | 'on-request' | 'never'
 type SandboxKind = 'readOnly' | 'workspaceWrite' | 'dangerFullAccess'
@@ -41,6 +44,8 @@ const MODES: { id: string; label: string; approval: ApprovalPolicy; sandbox: San
   { id: 'read-only', label: 'Read only', approval: 'on-request', sandbox: 'readOnly' },
   { id: 'full-access', label: 'Full access', approval: 'never', sandbox: 'dangerFullAccess' }
 ]
+
+export const CODEX_MODE_OPTIONS = MODES.map(({ id, label }) => ({ id, label }))
 
 /**
  * The catalog depends on the account. Seeded from the CLI's own cache so the
@@ -217,8 +222,10 @@ class CodexSession implements AgentSession {
 
   constructor(private ctx: SessionContext) {
     this.rel = relativizer(ctx.cwd)
-    const fallback = ctx.getBool(CODEX_BYPASS_APPROVALS, true) ? 'full-access' : 'auto'
-    this.mode = MODES.find((m) => m.id === ctx.mode) ?? MODES.find((m) => m.id === fallback)!
+    this.mode =
+      MODES.find((m) => m.id === ctx.mode) ??
+      MODES.find((m) => m.id === ctx.getSetting(CODEX_DEFAULT_MODE)) ??
+      MODES.find((m) => m.id === 'full-access')!
     this.model = ctx.model && ctx.model !== 'default' ? ctx.model : null
     const common = gitCommonDir(ctx.cwd)
     this.writableRoots = common ? [common] : []
@@ -650,7 +657,7 @@ const codexHistory: SessionHistory = {
       rpc.request<{ thread: StoredThread }>('thread/read', { threadId: sessionId, includeTurns: true })
     )
     const entries: HistoryEntry[] = []
-    const mapper = new CodexSession({ taskId: 'import', cwd, getBool: () => false })
+    const mapper = new CodexSession({ taskId: 'import', cwd, getSetting: () => '' })
     mapper.onEvent((event) => entries.push({ type: 'event', event }))
     for (const turn of thread.turns ?? []) {
       for (const item of turn.items) {

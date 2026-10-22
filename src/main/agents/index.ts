@@ -6,6 +6,7 @@ export {
   describeAgents,
   isAgentAvailable,
   getBoolSetting,
+  migrateAgentSettings,
   resolveSummaryAgent,
   FALLBACK_AGENT
 } from './registry'

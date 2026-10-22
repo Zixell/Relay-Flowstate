@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import type { AgentEvent, AgentSession, PlanItem, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
-import { getAgent, getBoolSetting, isAgentAvailable } from '../agents'
+import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
   getTaskById,
@@ -32,6 +32,7 @@ import { getGitChanges } from '../git'
 import { saveAttachment } from './attachments'
 import { initialStatusState, reduceStatus, type StatusState, type TaskStatus } from './status'
 import { notifyTask, setAttentionCount } from '../notifications'
+import { getSetting } from '../settings'
 
 interface TaskRow {
   id: string
@@ -142,7 +143,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     resumeSessionId: task.agent_session_id ?? undefined,
     model: task.model ?? undefined,
     mode: task.mode ?? undefined,
-    getBool: getBoolSetting
+    getSetting
   })
 
   const entry: LiveSession = {

@@ -125,7 +125,8 @@ export interface SessionContext {
   resumeSessionId?: string
   model?: string
   mode?: string
-  getBool: (key: string, fallback: boolean) => boolean
+  /** Raw app setting, '' when unset. */
+  getSetting: (key: string) => string
 }
 
 export interface AgentSession {

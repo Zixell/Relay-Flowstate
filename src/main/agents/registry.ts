@@ -1,8 +1,10 @@
 import { spawnSync } from 'child_process'
-import { getSetting } from '../settings'
+import { getSetting, setSetting } from '../settings'
 import type { AgentDefinition, AgentDescriptor, AgentId } from './types'
 import { claudeCodeAgent } from './claude-code'
 import { codexAgent } from './codex'
+import { DEFAULT_MODE, LEGACY_SKIP_PERMISSIONS } from './claude-chat'
+import { CODEX_DEFAULT_MODE, LEGACY_CODEX_BYPASS_APPROVALS } from './codex-chat'
 import { geminiAgent, openCodeAgent, gooseAgent } from './acp-agents'
 
 /**
@@ -46,6 +48,19 @@ export function listAgents(): AgentDefinition[] {
 
 export function getAgent(id: AgentId | undefined | null): AgentDefinition {
   return (id && byId.get(id)) || FALLBACK_AGENT
+}
+
+/**
+ * Carries the old "skip permissions" switches over to the default-mode selects,
+ * keeping an explicit choice: Bypass for Claude, Auto (sandboxed) for Codex.
+ */
+export function migrateAgentSettings(): void {
+  if (!getSetting(DEFAULT_MODE) && getSetting(LEGACY_SKIP_PERMISSIONS) === 'true') {
+    setSetting(DEFAULT_MODE, 'bypassPermissions')
+  }
+  if (!getSetting(CODEX_DEFAULT_MODE) && getSetting(LEGACY_CODEX_BYPASS_APPROVALS) === 'false') {
+    setSetting(CODEX_DEFAULT_MODE, 'auto')
+  }
 }
 
 /** Reads a boolean app setting, honouring the agent-declared default. */

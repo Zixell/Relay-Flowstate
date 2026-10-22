@@ -14,7 +14,7 @@ describe.runIf(process.env.RELAY_E2E)('CodexAdapter (live)', () => {
     writeFileSync(join(cwd, 'a.txt'), 'one\ntwo\nthree\n')
     execSync('git add . && git commit -qm init', { cwd })
     const events: AgentEvent[] = []
-    const ctx = { taskId: 't', cwd, mode: 'untrusted', getBool: () => false }
+    const ctx = { taskId: 't', cwd, mode: 'untrusted', getSetting: () => '' }
 
     const session = codexChat.createSession(ctx)
     const done = new Promise<void>((resolve) =>

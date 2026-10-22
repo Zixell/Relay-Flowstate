@@ -18,14 +18,16 @@ export interface AgentCommand {
   args: string[]
 }
 
-export interface AgentSettingDef {
+interface SettingDefBase {
   /** Settings key, persisted in the `settings` table. */
   key: string
   label: string
   description: string
-  type: 'boolean'
-  default: boolean
 }
+
+export type AgentSettingDef =
+  | (SettingDefBase & { type: 'boolean'; default: boolean })
+  | (SettingDefBase & { type: 'select'; default: string; options: { id: string; label: string }[] })
 
 /** Non-interactive invocation used for background work (session summaries). */
 export interface HeadlessCommand extends AgentCommand {

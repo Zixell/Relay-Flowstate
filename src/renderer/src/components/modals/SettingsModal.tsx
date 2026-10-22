@@ -7,6 +7,7 @@ import {
   DialogTitle,
   DialogDescription
 } from '../ui/dialog'
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import type { AgentDescriptor, AgentSettingDef } from '../../types'
@@ -29,21 +30,44 @@ const GENERAL_SETTINGS: AgentSettingDef[] = [
   }
 ]
 
-function SettingRow({ def, value, onToggle }: { def: AgentSettingDef; value: boolean; onToggle: (key: string, next: boolean) => void }) {
+type SettingValue = boolean | string
+
+function SettingRow({ def, value, onChange }: { def: AgentSettingDef; value: SettingValue; onChange: (key: string, next: SettingValue) => void }) {
+  if (def.type === 'select') {
+    return (
+      <div className="flex flex-col gap-2 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+        <p className="text-xs font-medium text-zinc-200 leading-snug">{def.label}</p>
+        <Select value={String(value)} onValueChange={(next) => onChange(def.key, next)}>
+          <SelectTrigger className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {def.options.map((o) => (
+              <SelectItem key={o.id} value={o.id} className="text-xs">
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-zinc-500 leading-relaxed">{def.description}</p>
+      </div>
+    )
+  }
+  const on = value === true
   return (
     <div className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
       <button
         role="checkbox"
-        aria-checked={value}
-        onClick={() => onToggle(def.key, !value)}
+        aria-checked={on}
+        onClick={() => onChange(def.key, !on)}
         className={cn(
           'relative mt-0.5 w-8 h-[18px] rounded-full transition-colors duration-200 shrink-0 focus:outline-none',
-          value ? 'bg-violet-500' : 'bg-zinc-700'
+          on ? 'bg-violet-500' : 'bg-zinc-700'
         )}
       >
         <span className={cn(
           'absolute top-[2px] left-[2px] w-[14px] h-[14px] bg-white rounded-full shadow transition-transform duration-200',
-          value ? 'translate-x-[14px]' : 'translate-x-0'
+          on ? 'translate-x-[14px]' : 'translate-x-0'
         )} />
       </button>
       <div>
@@ -58,7 +82,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const agents = useAppStore((s) => s.agents)
   const loadAgents = useAppStore((s) => s.loadAgents)
   // Values of every agent-declared setting, keyed by settings key
-  const [values, setValues] = useState<Record<string, boolean>>({})
+  const [values, setValues] = useState<Record<string, SettingValue>>({})
 
   const selectable = agents.filter((a) => a.enabled)
 
@@ -75,7 +99,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     Promise.all(
       defs.map(async (def) => {
         const raw: string = await window.api.settings.get(def.key)
-        return [def.key, raw === '' ? def.default : raw !== 'false'] as const
+        const value: SettingValue = raw === '' ? def.default : def.type === 'select' ? raw : raw !== 'false'
+        return [def.key, value] as const
       })
     ).then((entries) => {
       if (!cancelled) setValues(Object.fromEntries(entries))
@@ -83,7 +108,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     return () => { cancelled = true }
   }, [open, agents])
 
-  const toggle = useCallback((key: string, next: boolean) => {
+  const change = useCallback((key: string, next: SettingValue) => {
     setValues((v) => ({ ...v, [key]: next }))
     if (isElectron) window.api.settings.set(key, String(next))
   }, [])
@@ -105,7 +130,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           {/* General */}
           <div className="flex flex-col gap-3">
             {GENERAL_SETTINGS.map((def) => (
-              <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onToggle={toggle} />
+              <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onChange={change} />
             ))}
           </div>
 
@@ -172,7 +197,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                   </div>
 
                   {agent.settings.map((def) => (
-                    <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onToggle={toggle} />
+                    <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onChange={change} />
                   ))}
                 </div>
               </React.Fragment>

@@ -8,13 +8,15 @@ export type TaskStatus = 'running' | 'waiting' | 'completed' | 'failed' | 'pause
 export type ProcessType = 'claude-code' | 'codex' | 'aider' | 'opencode' | 'generic' | (string & {})
 
 /** Serializable agent description, mirrors `AgentDescriptor` in the main process. */
-export interface AgentSettingDef {
+interface SettingDefBase {
   key: string
   label: string
   description: string
-  type: 'boolean'
-  default: boolean
 }
+
+export type AgentSettingDef =
+  | (SettingDefBase & { type: 'boolean'; default: boolean })
+  | (SettingDefBase & { type: 'select'; default: string; options: { id: string; label: string }[] })
 
 export interface AgentDescriptor {
   id: ProcessType
