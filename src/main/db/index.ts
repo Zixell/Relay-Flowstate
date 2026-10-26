@@ -274,6 +274,11 @@ export function setTaskStarred(id: string, starred: boolean) {
   db.prepare('UPDATE tasks SET starred = ? WHERE id = ?').run(starred ? 1 : 0, id)
 }
 
+export function updateTaskTitle(id: string, title: string) {
+  if (!db) return
+  db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(title, id)
+}
+
 export function updateTaskNotes(id: string, notes: string) {
   if (!db) return
   db.prepare('UPDATE tasks SET notes = ?, updated_at = unixepoch() WHERE id = ?').run(notes, id)

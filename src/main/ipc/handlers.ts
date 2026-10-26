@@ -12,6 +12,7 @@ import {
   insertTaskEvent,
   updateTaskStatus,
   updateTaskNotes,
+  updateTaskTitle,
   setTaskStarred,
   appendTaskSummary,
   deleteTask
@@ -209,6 +210,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:setStarred', (_, { id, starred }: { id: string; starred: boolean }) => {
     setTaskStarred(id, starred)
     return { success: true }
+  })
+
+  ipcMain.handle('tasks:rename', (_, { id, title }: { id: string; title: string }) => {
+    const next = title.trim().slice(0, 200)
+    if (next) updateTaskTitle(id, next)
+    return { success: Boolean(next) }
   })
 
   ipcMain.handle('tasks:updateNotes', (_, { id, notes }) => {

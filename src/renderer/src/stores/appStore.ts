@@ -21,6 +21,8 @@ interface AppState {
   projects: Project[]
   agents: AgentDescriptor[]
   selectedTaskId: string | null
+  /** Task whose title is being edited in its header. */
+  renamingTaskId: string | null
   selectedProjectId: string | null
   searchQuery: string
   statusFilter: string | null
@@ -33,6 +35,8 @@ interface AppState {
   setTasks: (tasks: Task[]) => void
   setProjects: (projects: Project[]) => void
   selectTask: (id: string | null) => void
+  /** Opens the task with its title ready to edit; null ends editing. */
+  startRename: (id: string | null) => void
   setProjectFilter: (id: string | null) => void
   setSearch: (q: string) => void
   setStatusFilter: (s: string | null) => void
@@ -59,6 +63,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   projects: isElectron ? [] : MOCK_PROJECTS,
   agents: FALLBACK_AGENTS,
   selectedTaskId: null,
+  renamingTaskId: null,
   selectedProjectId: null,
   searchQuery: '',
   statusFilter: null,
@@ -71,6 +76,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setProjects: (projects) => set({ projects }),
 
   selectTask: (id) => set({ selectedTaskId: id }),
+
+  startRename: (id) => set(id ? { selectedTaskId: id, renamingTaskId: id } : { renamingTaskId: null }),
 
   setProjectFilter: (selectedProjectId) => set({ selectedProjectId, selectedTaskId: null }),
 

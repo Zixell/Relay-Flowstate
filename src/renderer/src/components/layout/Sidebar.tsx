@@ -9,7 +9,8 @@ import {
   Zap,
   Trash2,
   Download,
-  Star
+  Star,
+  Pencil
 } from 'lucide-react'
 import { cn, getProjectInitials } from '../../lib/utils'
 import { useAppStore, selectFilteredTasks } from '../../stores/appStore'
@@ -39,7 +40,8 @@ export function Sidebar({ className }: SidebarProps) {
     openSettings,
     deleteTask,
     deleteProject,
-    updateTask
+    updateTask,
+    startRename
   } = useAppStore()
 
   const filteredTasks = useAppStore(selectFilteredTasks)
@@ -294,6 +296,11 @@ export function Sidebar({ className }: SidebarProps) {
               label: allTasks.find((t) => t.id === ctxMenu.taskId)?.starred ? 'Unstar' : 'Star',
               icon: <Star className="w-3.5 h-3.5" />,
               onClick: () => toggleStar(ctxMenu.taskId, !allTasks.find((t) => t.id === ctxMenu.taskId)?.starred)
+            },
+            {
+              label: 'Rename',
+              icon: <Pencil className="w-3.5 h-3.5" />,
+              onClick: () => startRename(ctxMenu.taskId)
             },
             {
               label: 'Delete Task',

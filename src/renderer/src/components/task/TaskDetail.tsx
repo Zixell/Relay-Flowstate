@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ArrowLeft,
   GitBranch,
@@ -15,7 +15,8 @@ import {
   GitMerge,
   Copy,
   Check,
-  Sparkles
+  Sparkles,
+  Pencil
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
 import { STATUS_CONFIG, type Task } from '../../types'
@@ -37,6 +38,62 @@ interface TaskDetailProps {
 }
 
 type DetailTab = 'chat' | 'console' | 'timeline' | 'files' | 'notes' | 'summary'
+
+/** The task's name; a click turns it into a field. Enter or leaving saves, Esc cancels. */
+function TaskTitle({ task }: { task: Task }) {
+  const renaming = useAppStore((s) => s.renamingTaskId === task.id)
+  const startRename = useAppStore((s) => s.startRename)
+  const updateTask = useAppStore((s) => s.updateTask)
+  const [draft, setDraft] = useState(task.title)
+  // Esc removes the field, and the blur that may follow must not save
+  const cancelled = useRef(false)
+
+  useEffect(() => {
+    if (!renaming) return
+    setDraft(task.title)
+    cancelled.current = false
+  }, [renaming, task.title])
+
+  const save = (): void => {
+    if (cancelled.current) return
+    const next = draft.trim()
+    startRename(null)
+    if (!next || next === task.title) return
+    updateTask(task.id, { title: next })
+    if (isElectron) void window.api.tasks.rename(task.id, next)
+  }
+
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') {
+            cancelled.current = true
+            startRename(null)
+          }
+        }}
+        maxLength={200}
+        className="w-full max-w-xl mb-2 -ml-1.5 px-1.5 py-0.5 rounded-md bg-white/[0.04] border border-white/15 text-base font-semibold text-zinc-100 leading-snug outline-none focus:border-blue-500/50"
+      />
+    )
+  }
+  return (
+    <h1
+      onClick={() => startRename(task.id)}
+      title="Click to rename"
+      className="group flex items-center gap-2 text-base font-semibold text-zinc-100 leading-snug mb-2 cursor-text"
+    >
+      <span className="hover:bg-white/[0.04] -ml-1.5 px-1.5 rounded-md">{task.title}</span>
+      <Pencil className="w-3 h-3 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+    </h1>
+  )
+}
 
 function worktreeOptedOut(task: Task): boolean {
   try {
@@ -156,10 +213,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              {/* Title */}
-              <h1 className="text-base font-semibold text-zinc-100 leading-snug mb-2">
-                {task.title}
-              </h1>
+              {/* Title — click to rename */}
+              <TaskTitle task={task} />
 
               {/* Meta chips */}
               <div className="flex items-center gap-3 flex-wrap">
