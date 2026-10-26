@@ -51,6 +51,7 @@ import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
 import { listImportableSessions, importSession, restoreLegacyHistory, type ImportRequest } from '../session/import'
 import { forkTask } from '../session/fork'
+import { cancelResume } from '../session/auto-resume'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
@@ -227,6 +228,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {
+    cancelResume(id)
     closeConsole(id)
     await disposeSession(id)
     deleteAttachments(id)
@@ -266,6 +268,7 @@ export function registerIpcHandlers(): void {
     return sendMessage(taskId, input)
   })
   ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
+  ipcMain.handle('chat:cancelResume', (_, taskId: string) => cancelResume(taskId))
   ipcMain.handle(
     'chat:permission',
     (_, { taskId, requestId, optionId, answers }: { taskId: string; requestId: string; optionId: string; answers?: Record<string, string> }) =>

@@ -109,6 +109,8 @@ export type AgentEvent =
     }
   | { type: 'permission.resolved'; requestId: string; optionId: string; answers?: QuestionAnswers }
   | { type: 'plan.updated'; items: PlanItem[] }
+  /** The turn was refused because a usage limit is used up; `resetsAt` (ms since epoch) when known. */
+  | { type: 'limit.reached'; resetsAt?: number }
   /** `checkpoint` is the agent's own marker for the end of this turn, used to fork from it. */
   | { type: 'turn.completed'; turnId: string; reason: TurnEndReason; usage?: TurnUsage; checkpoint?: string }
   | { type: 'commands.updated'; commands: SlashCommandInfo[] }

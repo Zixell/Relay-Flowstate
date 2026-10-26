@@ -24,6 +24,7 @@ import type {
 import { EventHub } from './adapter'
 import { resolveExecutable } from './resolve-executable'
 import { relativizer } from './paths'
+import { blockedResetAt, parseResetTime } from '../session/limit-reset'
 
 // The SDK is ESM-only; load it lazily so the main bundle (CJS) can require this file.
 type SdkModule = typeof import('@anthropic-ai/claude-agent-sdk')
@@ -346,6 +347,12 @@ class ClaudeSession implements AgentSession {
       }
 
       case 'assistant': {
+        if (msg.error === 'rate_limit') {
+          // "You've hit your session limit · resets 10pm (…)": the reset comes with the
+          // rate-limit event, else from the message itself.
+          const text = msg.message.content.map((b) => (b.type === 'text' ? b.text : '')).join(' ')
+          this.emit({ type: 'limit.reached', resetsAt: blockedResetAt([...this.limits.values()]) ?? parseResetTime(text) })
+        }
         // Subagent traffic is summarized by its parent Task tool call.
         if (msg.parent_tool_use_id) return
         this.lastAssistantUuid = msg.uuid

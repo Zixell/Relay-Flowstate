@@ -27,6 +27,13 @@ const GENERAL_SETTINGS: AgentSettingDef[] = [
     description: 'Show a system notification when a chat task finishes or needs approval while the app is in the background.',
     type: 'boolean',
     default: true
+  },
+  {
+    key: 'RELAY_AUTO_CONTINUE',
+    label: 'Continue after a usage limit resets',
+    description: 'When an agent stops on its 5-hour or weekly limit, the task continues by itself once the limit resets. You can cancel it in the chat.',
+    type: 'boolean',
+    default: true
   }
 ]
 

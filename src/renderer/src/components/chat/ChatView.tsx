@@ -9,7 +9,7 @@ import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
 import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
-import { HandoffDivider, LimitBanner, hitUsageLimit } from './AgentSwitch'
+import { HandoffDivider, LimitBanner, hitUsageLimit, resumeAtOf } from './AgentSwitch'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -366,7 +366,7 @@ export function ChatView({ task }: Props) {
     const last = state.messages[state.messages.length - 1]
     return last?.kind === 'error' ? last.content : null
   }, [state.messages])
-  const limitHit = !state.inTurn && hitUsageLimit(lastError, state.usage?.limits)
+  const limitHit = !state.inTurn && (hitUsageLimit(lastError, state.usage?.limits) || resumeAtOf(task) !== undefined)
   const handoffSuggestion = handoff?.pending ? `Continue where ${handoff.fromLabel} stopped.` : null
 
   const handleFork = useCallback(

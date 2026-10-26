@@ -3,7 +3,7 @@ import { join } from 'path'
 import { net } from 'electron'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { initDatabase, resetRunningTasks, resetRunningTurns, convertLegacyTasks } from './db'
-import { disposeAllSessions } from './session/manager'
+import { disposeAllSessions, startAutoResume } from './session/manager'
 import { closeAllConsoles } from './console/manager'
 import { registerIpcHandlers } from './ipc/handlers'
 import { loadSettings } from './settings'
@@ -110,6 +110,7 @@ app.whenReady().then(() => {
     resetRunningTurns()
     loadSettings()
     migrateAgentSettings()
+    startAutoResume()
   } catch (err) {
     console.warn('[relay] DB init failed (native bindings not built?):', err)
   }

@@ -154,6 +154,16 @@ const api = {
         ipcRenderer.removeListener(`chat:event:${taskId}`, listener)
       }
     },
+    /** Drops the automatic continuation of a task that stopped on a usage limit. */
+    cancelResume: (taskId: string) => ipcRenderer.invoke('chat:cancelResume', taskId),
+    /** The task's metadata after main changed it (e.g. a scheduled continuation). */
+    onTaskMetadata: (callback: (payload: { taskId: string; metadata: string }) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: { taskId: string; metadata: string }) => callback(payload)
+      ipcRenderer.on('task:metadata', listener)
+      return () => {
+        ipcRenderer.removeListener('task:metadata', listener)
+      }
+    },
     /** Status changes of every chat-mode task. */
     onTaskStatus: (callback: (payload: { taskId: string; status: string; changedFilesCount?: number }) => void) => {
       const listener = (_: Electron.IpcRendererEvent, payload: { taskId: string; status: string; changedFilesCount?: number }) =>

@@ -38,5 +38,10 @@ export default function App() {
     })
   }, [updateTask])
 
+  useEffect(() => {
+    if (!window.api?.chat?.onTaskMetadata) return
+    return window.api.chat.onTaskMetadata(({ taskId, metadata }) => updateTask(taskId, { metadata }))
+  }, [updateTask])
+
   return <Layout />
 }

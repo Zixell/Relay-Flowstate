@@ -34,6 +34,8 @@ import { saveAttachment } from './attachments'
 import { initialStatusState, reduceStatus, type StatusState, type TaskStatus } from './status'
 import { notifyTask, setAttentionCount } from '../notifications'
 import { getSetting } from '../settings'
+import { blockedResetAt } from './limit-reset'
+import { cancelResume, initAutoResume, scheduleResume } from './auto-resume'
 
 interface TaskRow {
   id: string
@@ -61,6 +63,8 @@ interface LiveSession {
   commands: SlashCommandInfo[]
   /** Last reply text, for the "finished" notification. */
   lastText: string
+  /** Set when the current turn ran into a usage limit; the value is when it resets, if known. */
+  limitHit?: { resetsAt?: number }
   unsubscribe: () => void
 }
 
@@ -305,9 +309,20 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
       updateTaskPlan(taskId, e.items)
       break
 
-    case 'turn.completed':
+    case 'limit.reached':
+      s.limitHit = { resetsAt: e.resetsAt }
+      break
+
+    case 'turn.completed': {
+      // A refused turn continues by itself once the limit resets. Agents that do not
+      // say so explicitly still report the used-up limit.
+      const resetsAt =
+        s.limitHit?.resetsAt ?? (e.reason === 'error' ? blockedResetAt(usageByTask.get(taskId)?.limits) : undefined)
+      s.limitHit = undefined
+      if (resetsAt && e.reason !== 'interrupted') scheduleResume(taskId, resetsAt)
       finishTurn(s, e)
       break
+    }
 
     case 'session.exited':
       setStatus(s, reduceStatus(s.status, e))
@@ -412,6 +427,8 @@ export async function recapTask(taskId: string): Promise<void> {
 }
 
 export async function sendMessage(taskId: string, input: UserInput): Promise<MessageRow | undefined> {
+  // A message from the user (or the auto-continue itself) replaces a pending continuation
+  cancelResume(taskId)
   const s = await ensureSession(taskId)
   const attachments = (input.images ?? []).map((img) => saveAttachment(taskId, img))
   const message = insertMessage({
@@ -470,6 +487,8 @@ export async function switchAgent(taskId: string, agentId: string): Promise<unkn
     pending: true
   }
   switchTaskAgent(taskId, agentId, { ...meta, handoff })
+  // The new agent takes over; the old one's limit no longer matters
+  cancelResume(taskId)
   const message = insertMessage({
     id: randomUUID(),
     task_id: taskId,
@@ -569,6 +588,15 @@ export function peekTask(taskId: string): Promise<LiveState> {
     peeked.set(taskId, pending)
   }
   return pending.then(() => getLiveState(taskId))
+}
+
+/** Starts continuing tasks after their usage limit resets; call once the database is up. */
+export function startAutoResume(): void {
+  initAutoResume(async (taskId, text) => {
+    if (!getTaskById(taskId) || live.get(taskId)?.status.inTurn) return
+    insertTaskEvent({ id: randomUUID(), task_id: taskId, type: 'system', content: 'Usage limit reset — continued automatically' })
+    await sendMessage(taskId, { text })
+  })
 }
 
 export async function disposeSession(taskId: string): Promise<void> {

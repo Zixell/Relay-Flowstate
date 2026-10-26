@@ -105,16 +105,44 @@ export function HandoffDivider({ content }: { content: string | null }) {
   )
 }
 
-/** Offered when the agent stopped on a usage limit: carry on with another one. */
+/** When the task continues by itself after its usage limit resets (ms since epoch). */
+export function resumeAtOf(task: Task): number | undefined {
+  try {
+    const at = task.metadata ? JSON.parse(task.metadata).resumeAt : undefined
+    return typeof at === 'number' ? at : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function formatResumeTime(at: number): string {
+  const d = new Date(at)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`
+}
+
+/**
+ * Shown when the agent stopped on a usage limit: when it continues by itself,
+ * and other agents to carry on with right away.
+ */
 export function LimitBanner({ task }: { task: Task }) {
   const agents = useAppStore((s) => s.agents)
   const others = useOtherAgents(task)
   const [busy, setBusy] = useState<string | null>(null)
-  if (!others.length) return null
+  const resumeAt = resumeAtOf(task)
+  if (!others.length && !resumeAt) return null
   return (
     <div className="mb-2 flex items-center gap-2 flex-wrap rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-[12px]">
       <span className="text-amber-300">{processLabel(task.process_type, agents)} hit a usage limit.</span>
-      <span className="text-zinc-400">Continue with</span>
+      {resumeAt && (
+        <>
+          <span className="text-zinc-300">Continues automatically at {formatResumeTime(resumeAt)}</span>
+          <button onClick={() => void window.api.chat.cancelResume(task.id)} className="text-zinc-500 hover:text-zinc-300 underline-offset-2 hover:underline">
+            Cancel
+          </button>
+        </>
+      )}
+      {others.length > 0 && <span className="text-zinc-400">{resumeAt ? 'Or continue now with' : 'Continue with'}</span>}
       {others.map((a) => (
         <button
           key={a.id}
