@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
+import { homedir } from 'os'
 import { dirname, join } from 'path'
 import type {
   AgentEvent,
@@ -782,6 +783,45 @@ async function peek(ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model
   }
 }
 
+/**
+ * The plan limits behind the CLI's `/usage`, from a session that never sends
+ * anything to the model. Null for API-key and cloud-provider logins.
+ */
+async function readLimits(): Promise<RateLimitInfo[] | null> {
+  const { query } = await loadSdk()
+  const input = new InputQueue()
+  const q = query({
+    prompt: input,
+    options: {
+      cwd: homedir(),
+      settingSources: [],
+      pathToClaudeCodeExecutable: claudeExecutable(),
+      stderr: (data) => console.warn('[relay][claude limits]', data.trimEnd())
+    }
+  })
+  try {
+    // Experimental in the SDK; a failure leaves Settings on the last known values
+    const usage = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })
+    if (!usage.rate_limits_available || !usage.rate_limits) return null
+    const limits: RateLimitInfo[] = []
+    for (const [key, label] of Object.entries(RATE_LIMIT_LABELS)) {
+      const w = (usage.rate_limits as Record<string, { utilization: number | null; resets_at: string | null } | null | undefined>)[key]
+      if (!w || w.utilization == null) continue
+      const used = Math.round(w.utilization)
+      limits.push({
+        label,
+        usedPercent: used,
+        resetsAt: w.resets_at ? Date.parse(w.resets_at) : undefined,
+        status: used >= 100 ? 'blocked' : used >= 80 ? 'warning' : 'ok'
+      })
+    }
+    return limits
+  } finally {
+    input.close()
+    q.close()
+  }
+}
+
 export const claudeChat: ChatSupport = {
   capabilities: {
     resume: true,
@@ -790,10 +830,12 @@ export const claudeChat: ChatSupport = {
     images: true,
     forkFromTurn: true,
     background: true,
+    limits: true,
     models: MODELS,
     modes: MODES
   },
   createSession: (ctx) => new ClaudeSession(ctx),
   history: claudeHistory,
-  peek
+  peek,
+  readLimits
 }

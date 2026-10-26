@@ -54,6 +54,7 @@ import { readAttachment, deleteAttachments } from '../session/attachments'
 import { listImportableSessions, importSession, restoreLegacyHistory, type ImportRequest } from '../session/import'
 import { forkTask } from '../session/fork'
 import { cancelResume } from '../session/auto-resume'
+import { getAccountLimits, refreshLimits } from '../session/account-limits'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
@@ -351,6 +352,8 @@ export function registerIpcHandlers(): void {
 
   // --- Agents ---
   ipcMain.handle('agents:list', () => describeAgents())
+  ipcMain.handle('limits:get', () => getAccountLimits())
+  ipcMain.handle('limits:refresh', (_, agentId: string) => refreshLimits(agentId))
 
   // --- Settings ---
   ipcMain.handle('settings:get', (_, key: string) => {

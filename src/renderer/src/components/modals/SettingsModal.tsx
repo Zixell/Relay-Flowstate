@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Terminal, CheckCircle2, XCircle, FileText, Info } from 'lucide-react'
+import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,7 @@ import {
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
-import type { AgentDescriptor, AgentSettingDef } from '../../types'
+import type { AgentDescriptor, AgentSettingDef, RateLimitInfo } from '../../types'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -141,6 +141,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             ))}
           </div>
 
+          <UsageLimits agents={selectable.filter((a) => a.available && a.chat?.limits)} open={open} />
+
           <div className="h-px bg-white/[0.05]" />
 
           {/* Agent CLI status */}
@@ -213,6 +215,116 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+type AccountLimits = { limits: RateLimitInfo[]; updatedAt: number }
+
+function ago(at: number): string {
+  const mins = Math.round((Date.now() - at) / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.round(mins / 60)
+  return hours < 24 ? `${hours} h ago` : new Date(at).toLocaleDateString()
+}
+
+function resetText(at: number): string {
+  const d = new Date(at)
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`
+}
+
+/** Plan limits of each agent account: the last known values, then fresh ones from the CLI. */
+function UsageLimits({ agents, open }: { agents: AgentDescriptor[]; open: boolean }) {
+  const [limits, setLimits] = useState<Record<string, AccountLimits>>({})
+  const [loading, setLoading] = useState<Set<string>>(new Set())
+  const ids = agents.map((a) => a.id).join(',')
+
+  const refresh = useCallback((agentId: string) => {
+    setLoading((s) => new Set(s).add(agentId))
+    window.api.limits
+      .refresh(agentId)
+      .then((entry) => {
+        if (entry) setLimits((l) => ({ ...l, [agentId]: entry }))
+      })
+      .catch(() => {})
+      .finally(() =>
+        setLoading((s) => {
+          const next = new Set(s)
+          next.delete(agentId)
+          return next
+        })
+      )
+  }, [])
+
+  // Show what is known right away, and ask each CLI for the current numbers
+  useEffect(() => {
+    if (!open || !isElectron || !ids) return
+    void window.api.limits.get().then(setLimits)
+    for (const id of ids.split(',')) refresh(id)
+  }, [open, ids, refresh])
+
+  if (!agents.length) return null
+  return (
+    <>
+      <div className="h-px bg-white/[0.05]" />
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <Gauge className="w-3.5 h-3.5 text-zinc-400" />
+          <span className="text-sm font-medium text-zinc-200">Usage limits</span>
+        </div>
+        {agents.map((agent) => {
+          const entry = limits[agent.id]
+          const busy = loading.has(agent.id)
+          return (
+            <div key={agent.id} className="flex flex-col gap-2 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: agent.color }} />
+                <span className="text-xs font-medium text-zinc-200">{agent.label}</span>
+                {entry && <span className="text-[10.5px] text-zinc-600">updated {ago(entry.updatedAt)}</span>}
+                <button
+                  onClick={() => refresh(agent.id)}
+                  disabled={busy}
+                  title="Refresh"
+                  className="ml-auto p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
+                >
+                  <RefreshCw className={cn('w-3 h-3', busy && 'animate-spin')} />
+                </button>
+              </div>
+              {entry?.limits.length ? (
+                entry.limits.map((l) => {
+                  const used = l.usedPercent ?? 0
+                  return (
+                    <div key={l.label} className="flex flex-col gap-1">
+                      <div className="flex items-center text-[11px]">
+                        <span className="text-zinc-300">{l.label}</span>
+                        <span
+                          className={cn(
+                            'ml-auto',
+                            l.status === 'blocked' ? 'text-red-400' : l.status === 'warning' ? 'text-amber-400' : 'text-zinc-400'
+                          )}
+                        >
+                          {l.usedPercent != null ? `${l.usedPercent}% used` : l.status === 'blocked' ? 'limit reached' : '—'}
+                          {l.resetsAt ? <span className="text-zinc-600"> · resets {resetText(l.resetsAt)}</span> : null}
+                        </span>
+                      </div>
+                      <div className="h-1 rounded-full bg-white/[0.06] overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full', used >= 100 || l.status === 'blocked' ? 'bg-red-400/80' : used >= 80 ? 'bg-amber-400/80' : 'bg-zinc-400/70')}
+                          style={{ width: `${Math.min(100, Math.max(used, 1))}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <p className="text-[11px] text-zinc-500">{busy ? 'Reading limits…' : 'No limits reported for this login (API keys have none).'}</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </>
   )
 }
 

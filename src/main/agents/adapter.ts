@@ -155,6 +155,8 @@ export interface AgentCapabilities {
   forkFromTurn?: boolean
   /** Running commands and subagents can be sent to the background, and background tasks stopped. */
   background?: boolean
+  /** The account's plan limits can be read on demand (`readLimits`). */
+  limits?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }
@@ -228,6 +230,8 @@ export interface ChatSupport {
    * fill), read without running a turn. Used when no session is live.
    */
   peek?: (ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model'>) => Promise<{ commands?: SlashCommandInfo[]; usage?: SessionUsage }>
+  /** The account's plan limits (5-hour, weekly), read without running a turn; null when they do not apply. */
+  readLimits?: () => Promise<RateLimitInfo[] | null>
 }
 
 /** Small event emitter shared by adapters. */

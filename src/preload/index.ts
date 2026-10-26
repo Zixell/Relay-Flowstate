@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+/** An agent account's plan limits, as last reported (see main/session/account-limits.ts). */
+interface AccountLimits {
+  limits: { label: string; usedPercent?: number; resetsAt?: number; status?: 'ok' | 'warning' | 'blocked' }[]
+  updatedAt: number
+}
+
 const api = {
   /** Host OS — macOS draws native window controls, other platforms use ours. */
   platform: process.platform,
@@ -77,6 +83,14 @@ const api = {
   // Agents (catalog + per-agent capabilities and settings schema)
   agents: {
     list: () => ipcRenderer.invoke('agents:list')
+  },
+
+  // Plan limits (5-hour, weekly) per agent account
+  limits: {
+    /** Last known limits by agent id. */
+    get: (): Promise<Record<string, AccountLimits>> => ipcRenderer.invoke('limits:get'),
+    /** Asks the agent's CLI for its current limits; null when it cannot tell. */
+    refresh: (agentId: string): Promise<AccountLimits | null> => ipcRenderer.invoke('limits:refresh', agentId)
   },
 
   // Settings

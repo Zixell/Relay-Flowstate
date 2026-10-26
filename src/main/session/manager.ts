@@ -36,6 +36,7 @@ import { notifyTask, setAttentionCount } from '../notifications'
 import { getSetting } from '../settings'
 import { blockedResetAt } from './limit-reset'
 import { cancelResume, initAutoResume, scheduleResume } from './auto-resume'
+import { recordLimits } from './account-limits'
 
 interface TaskRow {
   id: string
@@ -295,6 +296,8 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
       const next: SessionUsage = { ...prev }
       for (const [k, v] of Object.entries(e.usage)) if (v !== undefined) (next as Record<string, unknown>)[k] = v
       usageByTask.set(taskId, next)
+      // Plan limits belong to the account, not the task: keep them for Settings
+      if (e.usage.limits?.length) recordLimits(loadTask(taskId).process_type, e.usage.limits)
       break
     }
 

@@ -39,6 +39,8 @@ export interface ChatCapabilities {
   forkFromTurn?: boolean
   /** Running commands and subagents can be sent to the background, and background tasks stopped. */
   background?: boolean
+  /** The account's plan limits can be read on demand. */
+  limits?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }

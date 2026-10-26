@@ -695,8 +695,17 @@ export const codexChat: ChatSupport = {
     get models() {
       return models
     },
-    modes: MODES.map(({ id, label }) => ({ id, label }))
+    modes: MODES.map(({ id, label }) => ({ id, label })),
+    limits: true
   },
   createSession: (ctx) => new CodexSession(ctx),
-  history: codexHistory
+  history: codexHistory,
+  readLimits: () =>
+    withAppServer(async (rpc) => {
+      const res = (await rpc.request('account/rateLimits/read', {})) as {
+        rateLimits?: { primary: RateWindow | null; secondary: RateWindow | null } | null
+      }
+      const snap = res.rateLimits
+      return snap ? [snap.primary, snap.secondary].filter((w): w is RateWindow => Boolean(w)).map(rateLimit) : null
+    })
 }
