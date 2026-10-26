@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { applyChatEvent, emptyChat, type ChatState } from '../stores/chatReducer'
-import type { ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo, TurnInfo } from '../types'
+import type { BackgroundTask, ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo, TurnInfo } from '../types'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -56,6 +56,7 @@ export function useChat(taskId: string): ChatHandle {
         inTurn?: boolean
         streaming: Record<string, string>
         plan: PlanItem[]
+        background?: BackgroundTask[]
         commands?: SlashCommandInfo[]
         usage?: SessionUsage | null
       }>
@@ -67,6 +68,7 @@ export function useChat(taskId: string): ChatHandle {
         streaming: liveState.streaming,
         streamingOrder: Object.keys(liveState.streaming),
         plan: liveState.plan,
+        background: liveState.background ?? [],
         commands: liveState.commands ?? [],
         usage: liveState.usage ?? null,
         costUsd: liveState.usage?.costUsd,

@@ -37,8 +37,21 @@ export interface ChatCapabilities {
   permissions: boolean
   images: boolean
   forkFromTurn?: boolean
+  /** Running commands and subagents can be sent to the background, and background tasks stopped. */
+  background?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
+}
+
+/** Work the agent left running in the background; mirrors `BackgroundTask` in the main process. */
+export interface BackgroundTask {
+  id: string
+  type: string
+  description: string
+  command?: string
+  toolCallId?: string
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  summary?: string
 }
 
 export interface Project {
@@ -279,6 +292,7 @@ export type AgentEvent =
   | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
   | { type: 'permission.resolved'; requestId: string; optionId: string }
   | { type: 'plan.updated'; items: PlanItem[] }
+  | { type: 'background.updated'; tasks: BackgroundTask[] }
   | {
       type: 'turn.completed'
       turnId: string

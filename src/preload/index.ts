@@ -154,6 +154,10 @@ const api = {
         ipcRenderer.removeListener(`chat:event:${taskId}`, listener)
       }
     },
+    /** Lets a running command or subagent carry on in the background. */
+    moveToBackground: (taskId: string, toolCallId: string): Promise<boolean> =>
+      ipcRenderer.invoke('chat:moveToBackground', { taskId, toolCallId }),
+    stopBackground: (taskId: string, backgroundId: string) => ipcRenderer.invoke('chat:stopBackground', { taskId, backgroundId }),
     /** Drops the automatic continuation of a task that stopped on a usage limit. */
     cancelResume: (taskId: string) => ipcRenderer.invoke('chat:cancelResume', taskId),
     /** The task's metadata after main changed it (e.g. a scheduled continuation). */

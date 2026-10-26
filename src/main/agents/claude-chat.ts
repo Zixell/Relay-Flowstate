@@ -6,6 +6,7 @@ import type {
   AgentSession,
   ChatSupport,
   AgentQuestion,
+  BackgroundTask,
   FileDiff,
   HistoryEntry,
   PermissionOption,
@@ -210,6 +211,19 @@ interface PendingPermission {
   question?: boolean
 }
 
+/** Readable name for the SDK's task kinds (local_bash, local_agent, local_workflow, …). */
+export function taskKind(raw: string | undefined): string {
+  if (!raw) return 'task'
+  if (/bash|shell/.test(raw)) return 'shell'
+  if (/agent/.test(raw)) return 'agent'
+  if (/workflow/.test(raw)) return 'workflow'
+  if (/monitor/.test(raw)) return 'monitor'
+  return raw.replace(/^local_/, '')
+}
+
+/** Ended background tasks kept on the list, newest last. */
+const MAX_ENDED_TASKS = 5
+
 /** The questions of an AskUserQuestion call, or undefined when the input does not look like one. */
 export function toQuestions(input: Record<string, unknown>): AgentQuestion[] | undefined {
   if (!Array.isArray(input.questions)) return undefined
@@ -278,6 +292,8 @@ class ClaudeSession implements AgentSession {
         settingSources: ['user', 'project', 'local'],
         systemPrompt: { type: 'preset', preset: 'claude_code' },
         pathToClaudeCodeExecutable: executable ?? undefined,
+        // Background tasks get their own Stop in the UI, so Stop on the turn leaves them running.
+        perTaskStopAffordance: true,
         canUseTool: (toolName, toolInput, opts) =>
           // Already answered through the hook below
           toolName === 'AskUserQuestion' && toolInput.answers
@@ -332,11 +348,44 @@ class ClaudeSession implements AgentSession {
             .catch(() => {})
         } else if (msg.subtype === 'commands_changed') {
           this.emitCommands(msg.commands)
+        } else if (msg.subtype === 'task_started') {
+          const tool = msg.tool_use_id ? this.tools.get(msg.tool_use_id) : undefined
+          this.taskInfo.set(msg.task_id, {
+            toolCallId: msg.tool_use_id,
+            command: tool ? str(tool.input.command) : undefined,
+            description: msg.description
+          })
+        } else if (msg.subtype === 'background_tasks_changed') {
+          // The full set of live background tasks: replace, do not merge
+          this.running = msg.tasks
+            .filter((t) => !t.ambient)
+            .map((t) => {
+              const info = this.taskInfo.get(t.task_id)
+              return {
+                id: t.task_id,
+                type: t.subagent_type ? `agent · ${t.subagent_type}` : taskKind(t.task_type),
+                description: t.description || info?.description || '',
+                command: info?.command,
+                toolCallId: info?.toolCallId,
+                status: 'running' as const
+              }
+            })
+          this.emitBackground()
+        } else if (msg.subtype === 'task_notification' && !msg.ambient) {
+          const was = this.running.find((t) => t.id === msg.task_id)
+          // Foreground tasks also report their end; only background ones are listed
+          if (was) {
+            this.running = this.running.filter((t) => t.id !== msg.task_id)
+            this.ended = [...this.ended, { ...was, status: msg.status, summary: msg.summary || undefined }].slice(-MAX_ENDED_TASKS)
+            this.emitBackground()
+          }
+          this.taskInfo.delete(msg.task_id)
         }
         return
 
       case 'stream_event': {
         if (msg.parent_tool_use_id) return
+        this.ensureTurn()
         const ev = msg.event
         if (ev.type === 'message_start') {
           this.streamMessageId = ev.message.id
@@ -355,6 +404,7 @@ class ClaudeSession implements AgentSession {
         }
         // Subagent traffic is summarized by its parent Task tool call.
         if (msg.parent_tool_use_id) return
+        this.ensureTurn()
         this.lastAssistantUuid = msg.uuid
         if (msg.message.usage) this.lastUsage = msg.message.usage as unknown as Record<string, number>
         const apiId = msg.message.id
@@ -462,6 +512,24 @@ class ClaudeSession implements AgentSession {
   private lastAssistantUuid: string | null = null
   private lastUsage: Record<string, number> | null = null
   private limits = new Map<string, RateLimitInfo>()
+  /** What task_started said about each task, for the background list. */
+  private taskInfo = new Map<string, { toolCallId?: string; command?: string; description: string }>()
+  private running: BackgroundTask[] = []
+  private ended: BackgroundTask[] = []
+
+  private emitBackground(): void {
+    this.emit({ type: 'background.updated', tasks: [...this.running, ...this.ended] })
+  }
+
+  /**
+   * The agent can start a turn by itself, e.g. to report on a background task
+   * that finished after the user's turn was over. Give it a turn of its own.
+   */
+  private ensureTurn(): void {
+    if (this.currentTurn || !this.query || this.disposed) return
+    this.currentTurn = randomUUID()
+    this.emit({ type: 'turn.started', turnId: this.currentTurn })
+  }
 
   private emitCommands(commands: { name: string; description?: string; argumentHint?: string }[]): void {
     this.emit({ type: 'commands.updated', commands: toCommands(commands) })
@@ -575,6 +643,14 @@ class ClaudeSession implements AgentSession {
 
   async setMode(mode: string): Promise<void> {
     await this.query?.setPermissionMode(mode as PermissionMode)
+  }
+
+  async moveToBackground(toolCallId: string): Promise<boolean> {
+    return (await this.query?.backgroundTasks(toolCallId)) ?? false
+  }
+
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    await this.query?.stopTask(taskId)
   }
 
   async setModel(model: string): Promise<void> {
@@ -713,6 +789,7 @@ export const claudeChat: ChatSupport = {
     permissions: true,
     images: true,
     forkFromTurn: true,
+    background: true,
     models: MODELS,
     modes: MODES
   },

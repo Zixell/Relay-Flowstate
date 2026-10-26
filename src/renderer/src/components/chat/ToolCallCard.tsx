@@ -13,7 +13,8 @@ import {
   ChevronRight,
   Loader2,
   Check,
-  X
+  X,
+  ArrowDownToLine
 } from 'lucide-react'
 import { diffLines } from 'diff'
 import { cn } from '../../lib/utils'
@@ -111,7 +112,14 @@ function Output({ text }: { text: string }) {
 
 export { DiffView }
 
-export const ToolCallCard = memo(function ToolCallCard({ message }: { message: ChatMessage }) {
+export const ToolCallCard = memo(function ToolCallCard({
+  message,
+  onBackground
+}: {
+  message: ChatMessage
+  /** Offered while a command or subagent runs: let it carry on in the background. */
+  onBackground?: () => Promise<unknown>
+}) {
   const tool = useMemo<ToolCallContent>(() => {
     try {
       return JSON.parse(message.content ?? '{}')
@@ -133,13 +141,17 @@ export const ToolCallCard = memo(function ToolCallCard({ message }: { message: C
   const isPath = tool.kind === 'read' || tool.kind === 'edit' || tool.kind === 'write'
   const command = tool.kind === 'bash' ? (tool.input.command as string | undefined) : undefined
   const expandable = hasDiff || Boolean(tool.output) || Boolean(command)
+  // Only commands and subagents block the turn in a way the agent can step around
+  const backgroundable = onBackground && status === 'running' && (tool.name === 'Bash' || tool.kind === 'task')
+  const [backgrounding, setBackgrounding] = useState(false)
 
   return (
     <div className="rounded-lg border border-white/[0.06] bg-white/[0.015] overflow-hidden">
+      <div className="flex items-center">
       <button
         onClick={() => expandable && setOpen((o) => !o)}
         className={cn(
-          'w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px]',
+          'flex-1 min-w-0 flex items-center gap-2 px-3 py-1.5 text-left text-[12px]',
           expandable ? 'hover:bg-white/[0.03] cursor-pointer' : 'cursor-default'
         )}
       >
@@ -155,6 +167,25 @@ export const ToolCallCard = memo(function ToolCallCard({ message }: { message: C
           {status === 'error' && <X className="w-3 h-3 text-red-400" />}
         </span>
       </button>
+      {backgroundable && (
+        <button
+          disabled={backgrounding}
+          onClick={async () => {
+            setBackgrounding(true)
+            try {
+              await onBackground()
+            } finally {
+              setBackgrounding(false)
+            }
+          }}
+          title="Let it keep running in the background; the agent carries on and is told when it finishes"
+          className="shrink-0 mr-1.5 flex items-center gap-1 h-6 px-2 rounded-md text-[11px] text-zinc-400 border border-white/[0.08] hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
+        >
+          <ArrowDownToLine className="w-3 h-3" />
+          Run in background
+        </button>
+      )}
+      </div>
 
       {open && (
         <div className="border-t border-white/[0.05] bg-black/30">

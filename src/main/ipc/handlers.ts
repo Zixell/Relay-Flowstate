@@ -45,6 +45,8 @@ import {
   peekTask,
   switchAgent,
   disposeSession,
+  moveToBackground,
+  stopBackgroundTask,
   recapTask
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
@@ -269,6 +271,12 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
   ipcMain.handle('chat:cancelResume', (_, taskId: string) => cancelResume(taskId))
+  ipcMain.handle('chat:moveToBackground', (_, { taskId, toolCallId }: { taskId: string; toolCallId: string }) =>
+    moveToBackground(taskId, toolCallId)
+  )
+  ipcMain.handle('chat:stopBackground', (_, { taskId, backgroundId }: { taskId: string; backgroundId: string }) =>
+    stopBackgroundTask(taskId, backgroundId)
+  )
   ipcMain.handle(
     'chat:permission',
     (_, { taskId, requestId, optionId, answers }: { taskId: string; requestId: string; optionId: string; answers?: Record<string, string> }) =>

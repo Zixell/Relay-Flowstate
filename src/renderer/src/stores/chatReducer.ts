@@ -1,4 +1,4 @@
-import type { ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo } from '../types'
+import type { BackgroundTask, ChatEventPayload, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo } from '../types'
 
 export interface ChatState {
   /** Persisted messages ordered by seq. */
@@ -8,6 +8,8 @@ export interface ChatState {
   /** Order in which streaming messages started, so they render in place. */
   streamingOrder: string[]
   plan: PlanItem[]
+  /** Background tasks of the live session: running ones and those that ended. */
+  background: BackgroundTask[]
   inTurn: boolean
   /** Running session cost reported by the agent. */
   costUsd?: number
@@ -24,6 +26,7 @@ export const emptyChat = (): ChatState => ({
   streaming: {},
   streamingOrder: [],
   plan: [],
+  background: [],
   inTurn: false,
   commands: [],
   usage: null,
@@ -81,6 +84,8 @@ export function applyChatEvent(state: ChatState, { event, message }: ChatEventPa
     }
     case 'plan.updated':
       return { ...next, plan: event.items }
+    case 'background.updated':
+      return { ...next, background: event.tasks }
     case 'turn.completed':
       return {
         ...next,
@@ -90,7 +95,8 @@ export function applyChatEvent(state: ChatState, { event, message }: ChatEventPa
         costUsd: event.usage?.costUsd ?? next.costUsd
       }
     case 'session.exited':
-      return { ...next, inTurn: false, streaming: {}, streamingOrder: [] }
+      // Background work dies with the agent's process
+      return { ...next, inTurn: false, streaming: {}, streamingOrder: [], background: [] }
     default:
       return next
   }

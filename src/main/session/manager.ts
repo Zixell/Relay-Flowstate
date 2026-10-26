@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, PlanItem, QuestionAnswers, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
 import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
@@ -61,6 +61,7 @@ interface LiveSession {
   streaming: Map<string, string>
   plan: PlanItem[]
   commands: SlashCommandInfo[]
+  background: BackgroundTask[]
   /** Last reply text, for the "finished" notification. */
   lastText: string
   /** Set when the current turn ran into a usage limit; the value is when it resets, if known. */
@@ -161,6 +162,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     plan: storedPlan(task),
     commands: agentCommands(task.process_type),
     lastText: '',
+    background: [],
     unsubscribe: () => {}
   }
   entry.unsubscribe = session.onEvent((e) => {
@@ -307,6 +309,10 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
     case 'plan.updated':
       s.plan = e.items
       updateTaskPlan(taskId, e.items)
+      break
+
+    case 'background.updated':
+      s.background = e.tasks
       break
 
     case 'limit.reached':
@@ -514,6 +520,14 @@ export function respondPermission(taskId: string, requestId: string, optionId: s
   live.get(taskId)?.session.respondPermission(requestId, optionId, answers)
 }
 
+export async function moveToBackground(taskId: string, toolCallId: string): Promise<boolean> {
+  return (await live.get(taskId)?.session.moveToBackground?.(toolCallId)) ?? false
+}
+
+export async function stopBackgroundTask(taskId: string, backgroundId: string): Promise<void> {
+  await live.get(taskId)?.session.stopBackgroundTask?.(backgroundId)
+}
+
 export async function setMode(taskId: string, mode: string): Promise<void> {
   updateTaskChatSettings(taskId, { mode })
   await live.get(taskId)?.session.setMode?.(mode)
@@ -540,12 +554,23 @@ export interface LiveState {
   plan: PlanItem[]
   commands: SlashCommandInfo[]
   usage: SessionUsage | null
+  background: BackgroundTask[]
 }
 
 export function getLiveState(taskId: string): LiveState {
   const s = live.get(taskId)
   const usage = usageByTask.get(taskId) ?? null
-  if (s) return { active: true, inTurn: s.status.inTurn, streaming: Object.fromEntries(s.streaming), plan: s.plan, commands: s.commands, usage }
+  if (s) {
+    return {
+      active: true,
+      inTurn: s.status.inTurn,
+      streaming: Object.fromEntries(s.streaming),
+      plan: s.plan,
+      commands: s.commands,
+      usage,
+      background: s.background
+    }
+  }
   const task = getTaskById(taskId) as TaskRow | null
   return {
     active: false,
@@ -553,7 +578,9 @@ export function getLiveState(taskId: string): LiveState {
     streaming: {},
     plan: task ? storedPlan(task) : [],
     commands: task ? agentCommands(task.process_type) : [],
-    usage
+    usage,
+    // Background work ends with the agent's process
+    background: []
   }
 }
 

@@ -1,9 +1,26 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Brain, ChevronRight, AlertTriangle, ImageOff, Loader2, FileCode, Undo2, CircleDot, CheckCircle2, Circle, GitFork } from 'lucide-react'
+import {
+  Brain,
+  ChevronRight,
+  AlertTriangle,
+  ImageOff,
+  Loader2,
+  FileCode,
+  Undo2,
+  CircleDot,
+  CheckCircle2,
+  Circle,
+  GitFork,
+  TerminalSquare,
+  Bot,
+  Activity,
+  XCircle,
+  Square
+} from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
 import { useAppStore } from '../../stores/appStore'
-import type { ChatMessage, PlanItem, SessionUsage, Task, TurnInfo } from '../../types'
+import type { BackgroundTask, ChatMessage, PlanItem, SessionUsage, Task, TurnInfo } from '../../types'
 import { Markdown } from './Markdown'
 import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
@@ -257,6 +274,73 @@ function PlanPanel({ items }: { items: PlanItem[] }) {
   )
 }
 
+/** Commands and subagents the agent left running, with a Stop for each. */
+function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundTask[] }) {
+  const [open, setOpen] = useState(true)
+  const [stopping, setStopping] = useState<Set<string>>(new Set())
+  if (!tasks.length) return null
+  const running = tasks.filter((t) => t.status === 'running').length
+  return (
+    <div className="rounded-xl border border-white/[0.06] bg-[#0f0f0f] mb-3">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-400">
+        <ChevronRight className={cn('w-3 h-3 transition-transform', open && 'rotate-90')} />
+        Background
+        <span className="text-zinc-600">{running ? `${running} running` : 'done'}</span>
+        {running > 0 && <Loader2 className="w-3 h-3 animate-spin text-zinc-600" />}
+      </button>
+      {open && (
+        <ul className="px-3 pb-2.5 space-y-1.5">
+          {tasks.map((t) => {
+            const Icon = t.type === 'shell' ? TerminalSquare : t.type.startsWith('agent') ? Bot : Activity
+            const label = t.command ?? t.description
+            return (
+              <li key={t.id} className="flex items-start gap-2 text-[12px]">
+                {t.status === 'running' ? (
+                  <Icon className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
+                ) : t.status === 'completed' ? (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/80 mt-0.5 shrink-0" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5 text-zinc-500 mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className={cn('truncate', t.command && 'font-mono text-[11.5px]', t.status === 'running' ? 'text-zinc-200' : 'text-zinc-500')} title={label}>
+                    {label}
+                  </div>
+                  <div className="text-[11px] text-zinc-600 truncate" title={t.summary}>
+                    {t.type}
+                    {t.status !== 'running' && ` · ${t.status}`}
+                    {t.summary && ` · ${t.summary}`}
+                  </div>
+                </div>
+                {t.status === 'running' && (
+                  <button
+                    disabled={stopping.has(t.id)}
+                    onClick={async () => {
+                      setStopping((s) => new Set(s).add(t.id))
+                      await window.api.chat.stopBackground(taskId, t.id).catch(() =>
+                        setStopping((s) => {
+                          const next = new Set(s)
+                          next.delete(t.id)
+                          return next
+                        })
+                      )
+                    }}
+                    title="Stop this task"
+                    className="shrink-0 flex items-center gap-1 h-6 px-2 rounded-md text-[11px] text-zinc-400 border border-white/[0.08] hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
+                  >
+                    {stopping.has(t.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-2.5 h-2.5" />}
+                    Stop
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 interface Props {
   task: Task
 }
@@ -389,7 +473,16 @@ export function ChatView({ task }: Props) {
       case 'thinking':
         return <Thinking text={m.content ?? ''} />
       case 'tool_call':
-        return <ToolCallCard message={m} />
+        return (
+          <ToolCallCard
+            message={m}
+            onBackground={
+              capabilities?.background && m.tool_status === 'running' && m.tool_call_id
+                ? () => window.api.chat.moveToBackground(task.id, m.tool_call_id!)
+                : undefined
+            }
+          />
+        )
       case 'permission':
         return <PermissionPrompt message={m} onRespond={respondPermission} active={m.id === lastPendingPermission} />
       case 'handoff':
@@ -467,6 +560,7 @@ export function ChatView({ task }: Props) {
       <div className="shrink-0 px-6 pb-4 pt-2">
         <div className="max-w-3xl mx-auto">
           {limitHit && <LimitBanner task={task} />}
+          <BackgroundPanel taskId={task.id} tasks={state.background} />
           <PlanPanel items={state.plan} />
           <Composer
             inTurn={state.inTurn}

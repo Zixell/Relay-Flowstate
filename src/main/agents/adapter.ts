@@ -56,6 +56,21 @@ export interface AgentQuestion {
   options: { label: string; description?: string }[]
 }
 
+/** Work the agent left running in the background: a shell command, a subagent, a monitor. */
+export interface BackgroundTask {
+  id: string
+  /** 'shell', 'agent', 'monitor', 'workflow', or the agent's own name for it. */
+  type: string
+  description: string
+  /** The command line of a shell task. */
+  command?: string
+  /** The tool call that started it. */
+  toolCallId?: string
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  /** What it came to, once it ended. */
+  summary?: string
+}
+
 /** Answers keyed by question text; several picks of a multi-select question are comma-separated. */
 export type QuestionAnswers = Record<string, string>
 
@@ -109,6 +124,8 @@ export type AgentEvent =
     }
   | { type: 'permission.resolved'; requestId: string; optionId: string; answers?: QuestionAnswers }
   | { type: 'plan.updated'; items: PlanItem[] }
+  /** The full list of background tasks after a change: the running ones and those that ended this session. */
+  | { type: 'background.updated'; tasks: BackgroundTask[] }
   /** The turn was refused because a usage limit is used up; `resetsAt` (ms since epoch) when known. */
   | { type: 'limit.reached'; resetsAt?: number }
   /** `checkpoint` is the agent's own marker for the end of this turn, used to fork from it. */
@@ -136,6 +153,8 @@ export interface AgentCapabilities {
   images: boolean
   /** The conversation can be forked at any finished turn (not only the last one). */
   forkFromTurn?: boolean
+  /** Running commands and subagents can be sent to the background, and background tasks stopped. */
+  background?: boolean
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }
@@ -160,6 +179,9 @@ export interface AgentSession {
   interrupt(): Promise<void>
   /** `answers` replies to a prompt that came with questions. */
   respondPermission(requestId: string, optionId: string, answers?: QuestionAnswers): void
+  /** Lets a running command or subagent carry on in the background; the turn moves on. */
+  moveToBackground?(toolCallId: string): Promise<boolean>
+  stopBackgroundTask?(taskId: string): Promise<void>
   setMode?(mode: string): Promise<void>
   setModel?(model: string): Promise<void>
   dispose(): Promise<void>
