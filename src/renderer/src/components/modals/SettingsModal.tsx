@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw } from 'lucide-react'
+import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -11,6 +11,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '.
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import type { AgentDescriptor, AgentSettingDef, RateLimitInfo } from '../../types'
+import { useUpdates } from '../../hooks/useUpdates'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -134,6 +135,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
         <div className="flex flex-col gap-5 px-6 pb-6 pt-1 max-h-[70vh] overflow-y-auto">
 
+          <UpdatesSection />
+
+          <div className="h-px bg-white/[0.05]" />
+
           {/* General */}
           <div className="flex flex-col gap-3">
             {GENERAL_SETTINGS.map((def) => (
@@ -215,6 +220,56 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** The app's version and its update from the GitHub releases. */
+function UpdatesSection() {
+  const u = useUpdates()
+  if (!u) return null
+  const busy = u.status === 'checking' || u.status === 'downloading'
+  const button =
+    u.status === 'ready'
+      ? { label: u.mode === 'install' ? 'Restart to update' : 'Open installer', run: () => window.api.updates.install() }
+      : u.status === 'available' && u.mode !== 'page'
+        ? { label: 'Download', run: () => window.api.updates.download() }
+        : u.status === 'available'
+          ? { label: 'Open release page', run: () => window.api.updates.install() }
+          : { label: 'Check for updates', run: () => window.api.updates.check() }
+  return (
+    <div className="flex flex-col gap-2 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+      <div className="flex items-center gap-2">
+        <Download className="w-3.5 h-3.5 text-zinc-400" />
+        <span className="text-xs font-medium text-zinc-200">Relay Flowstate {u.current}</span>
+        <button
+          onClick={() => void button.run()}
+          disabled={busy}
+          className="ml-auto h-7 px-3 rounded-lg text-[11.5px] font-medium border border-white/10 text-zinc-200 hover:bg-white/[0.06] disabled:opacity-50 flex items-center gap-1.5"
+        >
+          {busy && <RefreshCw className="w-3 h-3 animate-spin" />}
+          {u.status === 'checking' ? 'Checking…' : u.status === 'downloading' ? `Downloading ${u.progress ?? 0}%` : button.label}
+        </button>
+      </div>
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        {u.status === 'up-to-date' && 'You have the latest version.'}
+        {(u.status === 'available' || u.status === 'downloading') && (
+          <>
+            Version {u.version} is available.{' '}
+            {u.notesUrl && (
+              <a href={u.notesUrl} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                What's new
+              </a>
+            )}
+          </>
+        )}
+        {u.status === 'ready' &&
+          (u.mode === 'install'
+            ? `Version ${u.version} is downloaded. The app restarts to install it; running tasks are stopped.`
+            : `Version ${u.version} is downloaded. Open the installer, then drag Relay Flowstate into Applications and replace the old one. The app quits so it can be replaced; running tasks are stopped.`)}
+        {u.status === 'error' && <span className="text-red-400/80">Update check failed: {u.error}</span>}
+        {u.status === 'idle' && 'Updates come from the GitHub releases.'}
+      </p>
+    </div>
   )
 }
 

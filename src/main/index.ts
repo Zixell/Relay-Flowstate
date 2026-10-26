@@ -9,6 +9,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { loadSettings } from './settings'
 import { migrateAgentSettings } from './agents'
 import { adoptLoginShellPath } from './shell-path'
+import { startUpdateChecks } from './updater'
 
 // Lets tests and parallel dev instances run against their own database and worktrees.
 if (process.env.RELAY_USER_DATA) app.setPath('userData', process.env.RELAY_USER_DATA)
@@ -117,6 +118,7 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   registerWindowHandlers()
   createWindow()
+  startUpdateChecks()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

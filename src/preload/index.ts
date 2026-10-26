@@ -1,5 +1,16 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
+/** Where an app update stands (see main/updater.ts). */
+interface UpdateState {
+  status: 'idle' | 'checking' | 'up-to-date' | 'available' | 'downloading' | 'ready' | 'error'
+  current: string
+  version?: string
+  progress?: number
+  error?: string
+  notesUrl?: string
+  mode: 'install' | 'open' | 'page'
+}
+
 /** An agent account's plan limits, as last reported (see main/session/account-limits.ts). */
 interface AccountLimits {
   limits: { label: string; usedPercent?: number; resetsAt?: number; status?: 'ok' | 'warning' | 'blocked' }[]
@@ -83,6 +94,21 @@ const api = {
   // Agents (catalog + per-agent capabilities and settings schema)
   agents: {
     list: () => ipcRenderer.invoke('agents:list')
+  },
+
+  // App updates from the GitHub releases (see main/updater.ts)
+  updates: {
+    state: (): Promise<UpdateState> => ipcRenderer.invoke('updates:state'),
+    check: (): Promise<UpdateState> => ipcRenderer.invoke('updates:check'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    onState: (callback: (state: UpdateState) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, s: UpdateState) => callback(s)
+      ipcRenderer.on('updates:state', listener)
+      return () => {
+        ipcRenderer.removeListener('updates:state', listener)
+      }
+    }
   },
 
   // Plan limits (5-hour, weekly) per agent account

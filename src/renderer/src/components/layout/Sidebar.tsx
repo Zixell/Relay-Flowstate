@@ -17,6 +17,7 @@ import { STATUS_CONFIG } from '../../types'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { ContextMenu, type ContextMenuState } from '../ui/context-menu'
+import { useUpdates } from '../../hooks/useUpdates'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -51,6 +52,8 @@ export function Sidebar({ className }: SidebarProps) {
   const runningCount = allTasks.filter((t) => t.status === 'running').length
   const waitingCount = allTasks.filter((t) => t.status === 'waiting').length
 
+  const updates = useUpdates()
+  const updateWaiting = updates?.status === 'available' || updates?.status === 'downloading' || updates?.status === 'ready'
   const [projectsExpanded, setProjectsExpanded] = useState(true)
   const [ctxMenu, setCtxMenu] = useState<(ContextMenuState & { taskId: string }) | null>(null)
   const [projectCtxMenu, setProjectCtxMenu] = useState<(ContextMenuState & { projectId: string }) | null>(null)
@@ -325,6 +328,12 @@ export function Sidebar({ className }: SidebarProps) {
         >
           <Settings className="w-4 h-4" />
           <span className="text-xs">Settings</span>
+          {updateWaiting && (
+            <span className="ml-auto flex items-center gap-1.5 text-[10px] text-blue-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+              Update {updates?.version}
+            </span>
+          )}
         </button>
       </div>
     </aside>

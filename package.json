@@ -18,6 +18,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.301",
     "better-sqlite3": "^11.10.0",
     "diff": "^7.0.0",
+    "electron-updater": "^6.8.11",
     "node-pty": "^1.1.0",
     "react-markdown": "^9.1.0",
     "rehype-highlight": "^7.0.2",
@@ -65,6 +66,13 @@
   },
   "build": {
     "appId": "com.relay.app",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Zixell",
+        "repo": "Relay-Flowstate"
+      }
+    ],
     "productName": "Relay Flowstate",
     "directories": {
       "output": "dist"

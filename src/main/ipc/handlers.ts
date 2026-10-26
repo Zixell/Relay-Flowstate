@@ -55,6 +55,7 @@ import { listImportableSessions, importSession, restoreLegacyHistory, type Impor
 import { forkTask } from '../session/fork'
 import { cancelResume } from '../session/auto-resume'
 import { getAccountLimits, refreshLimits } from '../session/account-limits'
+import { checkForUpdates, downloadUpdate, getUpdateState, installUpdate } from '../updater'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
@@ -353,6 +354,12 @@ export function registerIpcHandlers(): void {
   // --- Agents ---
   ipcMain.handle('agents:list', () => describeAgents())
   ipcMain.handle('limits:get', () => getAccountLimits())
+
+  // --- Updates ---
+  ipcMain.handle('updates:state', () => getUpdateState())
+  ipcMain.handle('updates:check', () => checkForUpdates())
+  ipcMain.handle('updates:download', () => downloadUpdate())
+  ipcMain.handle('updates:install', () => installUpdate())
   ipcMain.handle('limits:refresh', (_, agentId: string) => refreshLimits(agentId))
 
   // --- Settings ---

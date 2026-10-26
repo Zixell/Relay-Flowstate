@@ -92,6 +92,10 @@ npm install
 npm run dev
 ```
 
+### Updates
+
+Installed builds check the GitHub releases at launch and from **Settings → Updates**. On Windows the update downloads in the background and installs on restart. On macOS the new `.dmg` is downloaded and opened, and you drag the app into Applications: the builds are not signed with a Developer ID, and macOS's updater refuses unsigned updates. Releases must carry `latest.yml` and the Windows installer's `.blockmap` next to the installers.
+
 ### Checks
 
 ```bash
