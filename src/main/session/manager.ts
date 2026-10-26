@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, PlanItem, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, PlanItem, QuestionAnswers, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
 import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
@@ -20,6 +20,7 @@ import {
   getTurnsRuntimeSeconds,
   insertMessage,
   updateMessage,
+  getMessage,
   getMessageByToolCall,
   getMessages,
   getTaskSummaries,
@@ -232,11 +233,16 @@ export function persistEvent(taskId: string, turnId: string | null, e: AgentEven
         kind: 'permission',
         tool_call_id: e.toolCallId,
         tool_status: 'pending',
-        content: JSON.stringify({ title: e.title, detail: e.detail, options: e.options })
+        content: JSON.stringify({ title: e.title, detail: e.detail, options: e.options, questions: e.questions })
       })
 
-    case 'permission.resolved':
-      return updateMessage(e.requestId, { tool_status: e.optionId })
+    case 'permission.resolved': {
+      if (!e.answers) return updateMessage(e.requestId, { tool_status: e.optionId })
+      // Keep what was answered next to the questions, for the transcript
+      const row = getMessage(e.requestId)
+      const content = row?.content ? { ...(JSON.parse(row.content) as Record<string, unknown>), answers: e.answers } : undefined
+      return updateMessage(e.requestId, { tool_status: e.optionId, content: content ? JSON.stringify(content) : undefined })
+    }
 
     case 'error':
       return insertMessage({ id: randomUUID(), task_id: taskId, turn_id: turnId, role: 'system', kind: 'error', content: e.message })
@@ -287,7 +293,11 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
     }
 
     case 'permission.requested':
-      notifyTask(taskId, `${loadTask(taskId).title} needs approval`, e.title)
+      notifyTask(
+        taskId,
+        `${loadTask(taskId).title} ${e.questions ? 'has a question' : 'needs approval'}`,
+        e.questions ? e.questions[0].question : e.title
+      )
       break
 
     case 'plan.updated':
@@ -481,8 +491,8 @@ export async function interrupt(taskId: string): Promise<void> {
   await live.get(taskId)?.session.interrupt()
 }
 
-export function respondPermission(taskId: string, requestId: string, optionId: string): void {
-  live.get(taskId)?.session.respondPermission(requestId, optionId)
+export function respondPermission(taskId: string, requestId: string, optionId: string, answers?: QuestionAnswers): void {
+  live.get(taskId)?.session.respondPermission(requestId, optionId, answers)
 }
 
 export async function setMode(taskId: string, mode: string): Promise<void> {

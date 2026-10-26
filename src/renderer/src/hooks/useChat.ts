@@ -11,7 +11,7 @@ export interface ChatHandle {
   loading: boolean
   send: (text: string, images?: { mediaType: string; data: string }[]) => Promise<void>
   interrupt: () => Promise<void>
-  respondPermission: (requestId: string, optionId: string) => Promise<void>
+  respondPermission: (requestId: string, optionId: string, answers?: Record<string, string>) => Promise<void>
   refreshTurns: () => Promise<void>
 }
 
@@ -111,8 +111,8 @@ export function useChat(taskId: string): ChatHandle {
   }, [taskId])
 
   const respondPermission = useCallback(
-    async (requestId: string, optionId: string) => {
-      await window.api.chat.respondPermission(taskId, requestId, optionId)
+    async (requestId: string, optionId: string, answers?: Record<string, string>) => {
+      await window.api.chat.respondPermission(taskId, requestId, optionId, answers)
     },
     [taskId]
   )

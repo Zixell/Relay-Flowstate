@@ -512,6 +512,11 @@ export function updateMessage(id: string, fields: { content?: string; tool_statu
   return db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined
 }
 
+export function getMessage(id: string): MessageRow | undefined {
+  if (!db) return undefined
+  return db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as MessageRow | undefined
+}
+
 export function getMessageByToolCall(taskId: string, toolCallId: string): MessageRow | undefined {
   if (!db) return undefined
   return db

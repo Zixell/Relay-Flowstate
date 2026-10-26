@@ -5,9 +5,11 @@ import type {
   AgentEvent,
   AgentSession,
   ChatSupport,
+  AgentQuestion,
   FileDiff,
   HistoryEntry,
   PermissionOption,
+  QuestionAnswers,
   PlanItem,
   RateLimitInfo,
   SessionContext,
@@ -31,6 +33,11 @@ type SDKUserMessage = import('@anthropic-ai/claude-agent-sdk').SDKUserMessage
 type PermissionMode = import('@anthropic-ai/claude-agent-sdk').PermissionMode
 type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
 type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
+type HookInput = import('@anthropic-ai/claude-agent-sdk').HookInput
+type HookJSONOutput = import('@anthropic-ai/claude-agent-sdk').HookJSONOutput
+
+/** How long a question may wait for the user, in seconds (hooks time out after a minute by default). */
+const QUESTION_TIMEOUT_S = 24 * 60 * 60
 
 /**
  * The user's `claude` for the SDK to spawn. On Windows an npm install gives a
@@ -198,6 +205,24 @@ interface PendingPermission {
   input: Record<string, unknown>
   suggestions?: PermissionUpdate[]
   toolUseId?: string
+  /** An AskUserQuestion prompt rather than a permission decision. */
+  question?: boolean
+}
+
+/** The questions of an AskUserQuestion call, or undefined when the input does not look like one. */
+export function toQuestions(input: Record<string, unknown>): AgentQuestion[] | undefined {
+  if (!Array.isArray(input.questions)) return undefined
+  const questions = (input.questions as Record<string, unknown>[])
+    .filter((q) => typeof q?.question === 'string' && Array.isArray(q.options))
+    .map((q) => ({
+      question: q.question as string,
+      header: str(q.header) ?? '',
+      multiSelect: q.multiSelect === true,
+      options: (q.options as Record<string, unknown>[])
+        .filter((o) => typeof o?.label === 'string')
+        .map((o) => ({ label: o.label as string, description: str(o.description) }))
+    }))
+  return questions.length ? questions : undefined
 }
 
 class ClaudeSession implements AgentSession {
@@ -252,7 +277,22 @@ class ClaudeSession implements AgentSession {
         settingSources: ['user', 'project', 'local'],
         systemPrompt: { type: 'preset', preset: 'claude_code' },
         pathToClaudeCodeExecutable: executable ?? undefined,
-        canUseTool: (toolName, toolInput, opts) => this.askPermission(toolName, toolInput, opts),
+        canUseTool: (toolName, toolInput, opts) =>
+          // Already answered through the hook below
+          toolName === 'AskUserQuestion' && toolInput.answers
+            ? Promise.resolve({ behavior: 'allow', updatedInput: toolInput })
+            : this.askPermission(toolName, toolInput, opts),
+        // Questions go through a hook: canUseTool is skipped in Bypass permissions mode,
+        // and the agent would carry on without an answer.
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: 'AskUserQuestion',
+              timeout: QUESTION_TIMEOUT_S,
+              hooks: [(input, toolUseId, { signal }) => this.askQuestions(input, toolUseId, signal)]
+            }
+          ]
+        },
         stderr: (data) => console.warn('[relay][claude]', data.trimEnd())
       }
     })
@@ -441,12 +481,20 @@ class ClaudeSession implements AgentSession {
     opts: { signal: AbortSignal; suggestions?: PermissionUpdate[]; toolUseID?: string; blockedPath?: string; decisionReason?: string }
   ): Promise<PermissionResult> {
     const requestId = randomUUID()
-    const options: PermissionOption[] = [{ id: 'allow_once', label: 'Allow', kind: 'allow_once' }]
-    if (opts.suggestions?.length) options.push({ id: 'allow_always', label: 'Always allow', kind: 'allow_always' })
-    options.push({ id: 'deny', label: 'Deny', kind: 'deny' })
+    const questions = toolName === 'AskUserQuestion' ? toQuestions(input) : undefined
+    const options: PermissionOption[] = questions
+      ? [
+          { id: 'answer', label: 'Answer', kind: 'allow_once' },
+          { id: 'deny', label: 'Skip', kind: 'deny' }
+        ]
+      : [{ id: 'allow_once', label: 'Allow', kind: 'allow_once' }]
+    if (!questions) {
+      if (opts.suggestions?.length) options.push({ id: 'allow_always', label: 'Always allow', kind: 'allow_always' })
+      options.push({ id: 'deny', label: 'Deny', kind: 'deny' })
+    }
 
     return new Promise<PermissionResult>((resolve) => {
-      this.permissions.set(requestId, { resolve, input, suggestions: opts.suggestions, toolUseId: opts.toolUseID })
+      this.permissions.set(requestId, { resolve, input, suggestions: opts.suggestions, toolUseId: opts.toolUseID, question: !!questions })
       opts.signal.addEventListener('abort', () => {
         if (!this.permissions.delete(requestId)) return
         resolve({ behavior: 'deny', message: 'Aborted' })
@@ -456,27 +504,42 @@ class ClaudeSession implements AgentSession {
         type: 'permission.requested',
         requestId,
         toolCallId: opts.toolUseID,
-        title: `${toolName}: ${toolTitle(toolName, input, this.rel)}`,
-        detail: opts.blockedPath ? this.rel(opts.blockedPath) : opts.decisionReason,
-        options
+        title: questions ? 'Claude has a question' : `${toolName}: ${toolTitle(toolName, input, this.rel)}`,
+        detail: questions ? undefined : opts.blockedPath ? this.rel(opts.blockedPath) : opts.decisionReason,
+        options,
+        questions
       })
     })
   }
 
-  respondPermission(requestId: string, optionId: string): void {
+  /** Puts an AskUserQuestion call to the user and hands the answers back as the tool's input. */
+  private async askQuestions(input: HookInput, toolUseId: string | undefined, signal: AbortSignal): Promise<HookJSONOutput> {
+    const toolInput = 'tool_input' in input ? (input.tool_input as Record<string, unknown>) : undefined
+    if (!toolInput || !toQuestions(toolInput)) return {}
+    const result = await this.askPermission('AskUserQuestion', toolInput, { signal, toolUseID: toolUseId })
+    return {
+      hookSpecificOutput:
+        result.behavior === 'allow'
+          ? { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: result.updatedInput }
+          : { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.message }
+    }
+  }
+
+  respondPermission(requestId: string, optionId: string, answers?: QuestionAnswers): void {
     const pending = this.permissions.get(requestId)
     if (!pending) return
     this.permissions.delete(requestId)
     if (optionId === 'deny') {
-      pending.resolve({ behavior: 'deny', message: 'The user denied this action.' })
+      pending.resolve({ behavior: 'deny', message: pending.question ? 'The user chose not to answer.' : 'The user denied this action.' })
     } else {
       pending.resolve({
         behavior: 'allow',
-        updatedInput: pending.input,
+        // AskUserQuestion takes the user's choices back through its input
+        updatedInput: answers ? { ...pending.input, answers } : pending.input,
         updatedPermissions: optionId === 'allow_always' ? pending.suggestions : undefined
       })
     }
-    this.emit({ type: 'permission.resolved', requestId, optionId })
+    this.emit({ type: 'permission.resolved', requestId, optionId, answers })
   }
 
   async send(input: UserInput): Promise<void> {

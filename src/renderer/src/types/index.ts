@@ -227,10 +227,22 @@ export interface ToolCallContent {
   diff?: FileDiff[]
 }
 
+/** A multiple-choice question from the agent, mirrors `AgentQuestion` in the main process. */
+export interface AgentQuestion {
+  question: string
+  header: string
+  multiSelect: boolean
+  options: { label: string; description?: string }[]
+}
+
 export interface PermissionContent {
   title: string
   detail?: string
   options: PermissionOption[]
+  /** The prompt is a set of questions rather than an allow/deny decision. */
+  questions?: AgentQuestion[]
+  /** What the user answered, keyed by question text. */
+  answers?: Record<string, string>
 }
 
 /** A command the user can run by typing `/name` in the composer. */

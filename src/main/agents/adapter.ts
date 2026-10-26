@@ -47,6 +47,18 @@ export interface TurnUsage {
   durationMs?: number
 }
 
+/** A multiple-choice question the agent asks the user (Claude's AskUserQuestion). */
+export interface AgentQuestion {
+  question: string
+  /** Short chip label, e.g. "Approach". */
+  header: string
+  multiSelect: boolean
+  options: { label: string; description?: string }[]
+}
+
+/** Answers keyed by question text; several picks of a multi-select question are comma-separated. */
+export type QuestionAnswers = Record<string, string>
+
 /** A command the user can run by typing `/name` in the composer. */
 export interface SlashCommandInfo {
   name: string
@@ -85,8 +97,17 @@ export type AgentEvent =
   | { type: 'tool.completed'; toolCallId: string; status: 'ok' | 'error'; output?: string; diff?: FileDiff[] }
   /** Details that arrive after the call started (ACP agents refine title and arguments). */
   | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[] }
-  | { type: 'permission.requested'; requestId: string; toolCallId?: string; title: string; detail?: string; options: PermissionOption[] }
-  | { type: 'permission.resolved'; requestId: string; optionId: string }
+  /** With `questions`, the prompt is a set of choices; it is answered through respondPermission's `answers`. */
+  | {
+      type: 'permission.requested'
+      requestId: string
+      toolCallId?: string
+      title: string
+      detail?: string
+      options: PermissionOption[]
+      questions?: AgentQuestion[]
+    }
+  | { type: 'permission.resolved'; requestId: string; optionId: string; answers?: QuestionAnswers }
   | { type: 'plan.updated'; items: PlanItem[] }
   /** `checkpoint` is the agent's own marker for the end of this turn, used to fork from it. */
   | { type: 'turn.completed'; turnId: string; reason: TurnEndReason; usage?: TurnUsage; checkpoint?: string }
@@ -135,7 +156,8 @@ export interface AgentSession {
   /** Starts a new turn. */
   send(input: UserInput): Promise<void>
   interrupt(): Promise<void>
-  respondPermission(requestId: string, optionId: string): void
+  /** `answers` replies to a prompt that came with questions. */
+  respondPermission(requestId: string, optionId: string, answers?: QuestionAnswers): void
   setMode?(mode: string): Promise<void>
   setModel?(model: string): Promise<void>
   dispose(): Promise<void>

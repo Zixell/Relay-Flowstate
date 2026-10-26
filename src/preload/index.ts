@@ -136,8 +136,9 @@ const api = {
         ipcRenderer.removeListener('app:selectTask', listener)
       }
     },
-    respondPermission: (taskId: string, requestId: string, optionId: string) =>
-      ipcRenderer.invoke('chat:permission', { taskId, requestId, optionId }),
+    /** `answers` (question text -> choice) replies to a prompt with questions. */
+    respondPermission: (taskId: string, requestId: string, optionId: string, answers?: Record<string, string>) =>
+      ipcRenderer.invoke('chat:permission', { taskId, requestId, optionId, answers }),
     setMode: (taskId: string, mode: string) => ipcRenderer.invoke('chat:setMode', { taskId, mode }),
     setModel: (taskId: string, model: string) => ipcRenderer.invoke('chat:setModel', { taskId, model }),
     history: (taskId: string, opts?: { beforeSeq?: number; limit?: number }) =>

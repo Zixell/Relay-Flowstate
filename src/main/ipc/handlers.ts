@@ -266,8 +266,10 @@ export function registerIpcHandlers(): void {
     return sendMessage(taskId, input)
   })
   ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
-  ipcMain.handle('chat:permission', (_, { taskId, requestId, optionId }: { taskId: string; requestId: string; optionId: string }) =>
-    respondPermission(taskId, requestId, optionId)
+  ipcMain.handle(
+    'chat:permission',
+    (_, { taskId, requestId, optionId, answers }: { taskId: string; requestId: string; optionId: string; answers?: Record<string, string> }) =>
+      respondPermission(taskId, requestId, optionId, answers)
   )
   ipcMain.handle('chat:setMode', (_, { taskId, mode }: { taskId: string; mode: string }) => setChatMode(taskId, mode))
   ipcMain.handle('chat:setModel', (_, { taskId, model }: { taskId: string; model: string }) => setChatModel(taskId, model))
