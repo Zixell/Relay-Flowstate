@@ -15,7 +15,8 @@ import {
   Bot,
   Activity,
   XCircle,
-  Square
+  Square,
+  X
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
@@ -278,8 +279,11 @@ function PlanPanel({ items }: { items: PlanItem[] }) {
 function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundTask[] }) {
   const [open, setOpen] = useState(true)
   const [stopping, setStopping] = useState<Set<string>>(new Set())
-  if (!tasks.length) return null
+  // The list that was closed with ×; it comes back once anything on it changes
+  const [dismissed, setDismissed] = useState<string | null>(null)
   const running = tasks.filter((t) => t.status === 'running').length
+  const signature = tasks.map((t) => `${t.id}:${t.status}`).join(',')
+  if (!tasks.length || (!running && dismissed === signature)) return null
   return (
     <div className="rounded-xl border border-white/[0.06] bg-[#0f0f0f] mb-3">
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-400">
@@ -287,6 +291,19 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
         Background
         <span className="text-zinc-600">{running ? `${running} running` : 'done'}</span>
         {running > 0 && <Loader2 className="w-3 h-3 animate-spin text-zinc-600" />}
+        {!running && (
+          <span
+            role="button"
+            title="Clear"
+            onClick={(e) => {
+              e.stopPropagation()
+              setDismissed(signature)
+            }}
+            className="ml-auto p-0.5 rounded text-zinc-600 hover:text-zinc-300 hover:bg-white/[0.05]"
+          >
+            <X className="w-3 h-3" />
+          </span>
+        )}
       </button>
       {open && (
         <ul className="px-3 pb-2.5 space-y-1.5">

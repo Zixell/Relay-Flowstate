@@ -623,6 +623,11 @@ class ClaudeSession implements AgentSession {
     if (!this.currentTurn) {
       this.currentTurn = randomUUID()
       this.emit({ type: 'turn.started', turnId: this.currentTurn })
+      // Ended background tasks have been seen; the user's next message clears them
+      if (this.ended.length) {
+        this.ended = []
+        this.emitBackground()
+      }
     }
     const content: Array<Record<string, unknown>> = []
     for (const img of input.images ?? []) {
