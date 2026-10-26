@@ -198,6 +198,11 @@ const api = {
     moveToBackground: (taskId: string, toolCallId: string): Promise<boolean> =>
       ipcRenderer.invoke('chat:moveToBackground', { taskId, toolCallId }),
     stopBackground: (taskId: string, backgroundId: string) => ipcRenderer.invoke('chat:stopBackground', { taskId, backgroundId }),
+    /** The chat's /config: one session setting of the task; null returns it to the agent's default. */
+    setSessionSetting: (taskId: string, key: string, value: string | boolean | null) =>
+      ipcRenderer.invoke('chat:setSessionSetting', { taskId, key, value }),
+    sessionSettingOptions: (taskId: string): Promise<Record<string, { id: string; label: string }[]>> =>
+      ipcRenderer.invoke('chat:sessionSettingOptions', taskId),
     /** Drops the automatic continuation of a task that stopped on a usage limit. */
     cancelResume: (taskId: string) => ipcRenderer.invoke('chat:cancelResume', taskId),
     /** The task's metadata after main changed it (e.g. a scheduled continuation). */

@@ -71,6 +71,20 @@ export interface BackgroundTask {
   summary?: string
 }
 
+/** A setting of the agent's session that can be changed from the chat — the app's `/config`. */
+export interface SessionSettingDef {
+  key: string
+  label: string
+  description: string
+  type: 'boolean' | 'select' | 'text'
+  /** Choices of a select; more may come from the live session (`sessionSettingOptions`). */
+  options?: { id: string; label: string }[]
+  placeholder?: string
+}
+
+/** Values the user set for a task; a key that is absent follows the agent's own configuration. */
+export type SessionSettings = Record<string, string | boolean>
+
 /** Answers keyed by question text; several picks of a multi-select question are comma-separated. */
 export type QuestionAnswers = Record<string, string>
 
@@ -157,6 +171,8 @@ export interface AgentCapabilities {
   background?: boolean
   /** The account's plan limits can be read on demand (`readLimits`). */
   limits?: boolean
+  /** Session settings the chat can change (thinking, effort, …). */
+  sessionSettings?: SessionSettingDef[]
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
 }
@@ -169,6 +185,8 @@ export interface SessionContext {
   resumeSessionId?: string
   model?: string
   mode?: string
+  /** The task's own session settings. */
+  sessionSettings?: SessionSettings
   /** Raw app setting, '' when unset. */
   getSetting: (key: string) => string
 }
@@ -184,6 +202,10 @@ export interface AgentSession {
   /** Lets a running command or subagent carry on in the background; the turn moves on. */
   moveToBackground?(toolCallId: string): Promise<boolean>
   stopBackgroundTask?(taskId: string): Promise<void>
+  /** Applies changed session settings to the running session; null returns a key to the agent's default. */
+  applySessionSettings?(changes: Record<string, string | boolean | null>): Promise<void>
+  /** Choices for select settings that only the running agent knows (e.g. custom output styles). */
+  sessionSettingOptions?(): Promise<Record<string, { id: string; label: string }[]>>
   setMode?(mode: string): Promise<void>
   setModel?(model: string): Promise<void>
   dispose(): Promise<void>

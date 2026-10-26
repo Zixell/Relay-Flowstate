@@ -41,8 +41,20 @@ export interface ChatCapabilities {
   background?: boolean
   /** The account's plan limits can be read on demand. */
   limits?: boolean
+  /** Session settings the chat can change — the app's /config. */
+  sessionSettings?: SessionSettingDef[]
   models?: { id: string; label: string }[]
   modes?: { id: string; label: string }[]
+}
+
+/** A session setting the chat can change; mirrors `SessionSettingDef` in the main process. */
+export interface SessionSettingDef {
+  key: string
+  label: string
+  description: string
+  type: 'boolean' | 'select' | 'text'
+  options?: { id: string; label: string }[]
+  placeholder?: string
 }
 
 /** Work the agent left running in the background; mirrors `BackgroundTask` in the main process. */

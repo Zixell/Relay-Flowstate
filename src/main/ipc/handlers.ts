@@ -47,6 +47,8 @@ import {
   disposeSession,
   moveToBackground,
   stopBackgroundTask,
+  setSessionSetting,
+  sessionSettingOptions,
   recapTask
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
@@ -276,6 +278,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('chat:moveToBackground', (_, { taskId, toolCallId }: { taskId: string; toolCallId: string }) =>
     moveToBackground(taskId, toolCallId)
   )
+  ipcMain.handle(
+    'chat:setSessionSetting',
+    (_, { taskId, key, value }: { taskId: string; key: string; value: string | boolean | null }) => setSessionSetting(taskId, key, value)
+  )
+  ipcMain.handle('chat:sessionSettingOptions', (_, taskId: string) => sessionSettingOptions(taskId))
   ipcMain.handle('chat:stopBackground', (_, { taskId, backgroundId }: { taskId: string; backgroundId: string }) =>
     stopBackgroundTask(taskId, backgroundId)
   )

@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionSettings, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
 import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
@@ -150,6 +150,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     resumeSessionId: task.agent_session_id ?? undefined,
     model: task.model ?? undefined,
     mode: task.mode ?? undefined,
+    sessionSettings: readMeta(task.metadata).sessionSettings as SessionSettings | undefined,
     getSetting
   })
 
@@ -521,6 +522,34 @@ export async function interrupt(taskId: string): Promise<void> {
 
 export function respondPermission(taskId: string, requestId: string, optionId: string, answers?: QuestionAnswers): void {
   live.get(taskId)?.session.respondPermission(requestId, optionId, answers)
+}
+
+function readMeta(metadata: string | null | undefined): Record<string, unknown> {
+  try {
+    return metadata ? (JSON.parse(metadata) as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Changes one of the task's session settings (the chat's /config); null returns it
+ * to the agent's own configuration. Kept with the task and applied to a live session.
+ */
+export async function setSessionSetting(taskId: string, key: string, value: string | boolean | null): Promise<void> {
+  const meta = readMeta(loadTask(taskId).metadata)
+  const settings = { ...((meta.sessionSettings as SessionSettings | undefined) ?? {}) }
+  if (value === null) delete settings[key]
+  else settings[key] = value
+  meta.sessionSettings = settings
+  updateTaskMetadata(taskId, meta)
+  send('task:metadata', { taskId, metadata: JSON.stringify(meta) })
+  await live.get(taskId)?.session.applySessionSettings?.({ [key]: value })
+}
+
+/** Choices for the task's select settings that only a running session knows. */
+export async function sessionSettingOptions(taskId: string): Promise<Record<string, { id: string; label: string }[]>> {
+  return (await live.get(taskId)?.session.sessionSettingOptions?.().catch(() => ({}))) ?? {}
 }
 
 export async function moveToBackground(taskId: string, toolCallId: string): Promise<boolean> {

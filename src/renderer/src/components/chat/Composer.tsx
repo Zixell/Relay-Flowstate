@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, ImagePlus, X } from 'lucide-react'
+import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ChatCapabilities, SlashCommandInfo } from '../../types'
+import { SessionSettings } from './SessionSettings'
 
 interface Props {
   inTurn: boolean
@@ -17,6 +18,9 @@ interface Props {
   onInterrupt: () => void
   onModeChange: (mode: string) => void
   onModelChange: (model: string) => void
+  /** The task's session settings (the chat's /config); absent keys follow the agent's own config. */
+  sessionSettings?: Record<string, string | boolean>
+  onSessionSetting?: (key: string, value: string | boolean | null) => void
 }
 
 interface Attachment {
@@ -88,9 +92,13 @@ export function Composer({
   onSend,
   onInterrupt,
   onModeChange,
-  onModelChange
+  onModelChange,
+  sessionSettings = {},
+  onSessionSetting
 }: Props) {
   const [text, setText] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingDefs = onSessionSetting && taskId ? capabilities?.sessionSettings : undefined
   const [caret, setCaret] = useState(0)
   const [images, setImages] = useState<Attachment[]>([])
   const [menuIndex, setMenuIndex] = useState(0)
@@ -180,12 +188,19 @@ export function Composer({
   const submit = useCallback(() => {
     const value = text.trim()
     if (!value && images.length === 0) return
+    // `/config` on its own opens the settings panel, as it does in the CLI; with arguments it goes to the agent
+    if (value === '/config' && settingDefs?.length) {
+      setText('')
+      setCaret(0)
+      setSettingsOpen(true)
+      return
+    }
     onSend(value, images.map(({ mediaType, data }) => ({ mediaType, data })))
     setText('')
     setCaret(0)
     setImages([])
     requestAnimationFrame(resize)
-  }, [text, images, onSend])
+  }, [text, images, onSend, settingDefs])
 
   const addFiles = async (files: FileList | File[]): Promise<void> => {
     const imgs = [...files].filter((f) => f.type.startsWith('image/'))
@@ -198,6 +213,15 @@ export function Composer({
 
   return (
     <div className="relative rounded-2xl border border-white/[0.09] bg-[#111] focus-within:border-white/20 transition-colors">
+      {settingsOpen && settingDefs && (
+        <SessionSettings
+          taskId={taskId!}
+          defs={settingDefs}
+          values={sessionSettings}
+          onChange={onSessionSetting!}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       {menuOpen && (
         <div className="absolute bottom-full left-0 right-0 mb-2 rounded-xl border border-white/[0.09] bg-[#141414] shadow-2xl shadow-black/50 py-1 z-20 max-h-72 overflow-y-auto overflow-x-hidden">
           {items.map((item, i) => (
@@ -339,6 +363,19 @@ export function Composer({
             ))}
           </select>
         )}
+        {settingDefs?.length ? (
+          <button
+            onClick={() => setSettingsOpen((o) => !o)}
+            title="Session settings (/config)"
+            className={cn(
+              'h-7 flex items-center gap-1.5 px-2 rounded-md text-[12px] hover:bg-white/[0.05]',
+              Object.keys(sessionSettings).length ? 'text-zinc-200' : 'text-zinc-500 hover:text-zinc-200'
+            )}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            {Object.keys(sessionSettings).length > 0 && <span className="text-[10.5px]">{Object.keys(sessionSettings).length}</span>}
+          </button>
+        ) : null}
 
         <div className="ml-auto flex items-center gap-1.5">
           {inTurn && (

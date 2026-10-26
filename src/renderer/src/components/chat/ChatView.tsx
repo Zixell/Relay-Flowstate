@@ -448,6 +448,14 @@ export function ChatView({ task }: Props) {
     [task.id, refreshTurns]
   )
 
+  const sessionSettings = useMemo<Record<string, string | boolean>>(() => {
+    try {
+      return (task.metadata ? JSON.parse(task.metadata).sessionSettings : undefined) ?? {}
+    } catch {
+      return {}
+    }
+  }, [task.metadata])
+
   const lastTurnId = useMemo(() => [...turns].reverse().find((t) => t.status !== 'running')?.id, [turns])
   const handoff = useMemo(() => {
     try {
@@ -597,6 +605,8 @@ export function ChatView({ task }: Props) {
               updateTask(task.id, { model })
               void window.api.chat.setModel(task.id, model)
             }}
+            sessionSettings={sessionSettings}
+            onSessionSetting={(key, value) => void window.api.chat.setSessionSetting(task.id, key, value)}
           />
           <UsageBar usage={state.usage} costUsd={state.costUsd} />
         </div>

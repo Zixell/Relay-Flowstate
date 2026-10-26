@@ -16,6 +16,8 @@ import type {
   RateLimitInfo,
   SessionContext,
   SessionHistory,
+  SessionSettingDef,
+  SessionSettings,
   SessionUsage,
   SlashCommandInfo,
   ToolKind,
@@ -37,6 +39,7 @@ type PermissionMode = import('@anthropic-ai/claude-agent-sdk').PermissionMode
 type PermissionResult = import('@anthropic-ai/claude-agent-sdk').PermissionResult
 type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdate
 type HookInput = import('@anthropic-ai/claude-agent-sdk').HookInput
+type ClaudeSettings = import('@anthropic-ai/claude-agent-sdk').Settings
 type HookJSONOutput = import('@anthropic-ai/claude-agent-sdk').HookJSONOutput
 
 /** How long a question may wait for the user, in seconds (hooks time out after a minute by default). */
@@ -71,6 +74,68 @@ const MODES: { id: PermissionMode; label: string }[] = [
 ]
 
 export const MODE_OPTIONS = MODES
+
+/** App setting key for the composer's next-message suggestions; the rest are Claude Code settings keys. */
+const PROMPT_SUGGESTIONS = 'promptSuggestions'
+
+/** The chat's /config: Claude Code settings applied to this task's session only (the flag layer), never written to files. */
+const SESSION_SETTINGS: SessionSettingDef[] = [
+  {
+    key: 'alwaysThinkingEnabled',
+    label: 'Thinking',
+    description: 'Let Claude think before answering, on models that support it.',
+    type: 'boolean'
+  },
+  {
+    key: 'effortLevel',
+    label: 'Effort',
+    description: 'How much effort Claude puts into a reply. Max applies to this session only.',
+    type: 'select',
+    options: [
+      { id: 'low', label: 'Low' },
+      { id: 'medium', label: 'Medium' },
+      { id: 'high', label: 'High' },
+      { id: 'xhigh', label: 'Extra high' },
+      { id: 'max', label: 'Max' }
+    ]
+  },
+  {
+    key: 'outputStyle',
+    label: 'Output style',
+    description: 'How Claude writes its replies. Custom styles from your Claude config show up once the session runs.',
+    type: 'select',
+    options: [
+      { id: 'default', label: 'Default' },
+      { id: 'Explanatory', label: 'Explanatory' },
+      { id: 'Learning', label: 'Learning' }
+    ]
+  },
+  {
+    key: 'autoCompactEnabled',
+    label: 'Auto-compact',
+    description: 'Summarize the conversation automatically when the context fills up.',
+    type: 'boolean'
+  },
+  {
+    key: 'language',
+    label: 'Response language',
+    description: 'The language Claude answers in.',
+    type: 'text',
+    placeholder: 'e.g. russian'
+  },
+  {
+    key: PROMPT_SUGGESTIONS,
+    label: 'Suggest next message',
+    description: "Claude's guess at your next message, shown in the composer; Tab accepts it.",
+    type: 'boolean'
+  }
+]
+
+/** Session settings as Claude Code flag settings (everything but the app's own keys). */
+function flagSettings(settings: SessionSettings | undefined): ClaudeSettings | undefined {
+  const flags = Object.fromEntries(Object.entries(settings ?? {}).filter(([k]) => k !== PROMPT_SUGGESTIONS))
+  return Object.keys(flags).length ? (flags as ClaudeSettings) : undefined
+}
 
 const RATE_LIMIT_LABELS: Record<string, string> = {
   five_hour: '5-hour',
@@ -289,6 +354,7 @@ class ClaudeSession implements AgentSession {
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         promptSuggestions: true,
+        settings: flagSettings(this.ctx.sessionSettings),
         // Behave like the user's own CLI: CLAUDE.md, settings, custom commands.
         settingSources: ['user', 'project', 'local'],
         systemPrompt: { type: 'preset', preset: 'claude_code' },
@@ -452,6 +518,7 @@ class ClaudeSession implements AgentSession {
       }
 
       case 'prompt_suggestion':
+        if (this.ctx.sessionSettings?.[PROMPT_SUGGESTIONS] === false) return
         if (msg.suggestion.trim()) this.emit({ type: 'prompt.suggested', text: msg.suggestion.trim() })
         return
 
@@ -651,6 +718,23 @@ class ClaudeSession implements AgentSession {
     await this.query?.setPermissionMode(mode as PermissionMode)
   }
 
+  async applySessionSettings(changes: Record<string, string | boolean | null>): Promise<void> {
+    const next = { ...this.ctx.sessionSettings }
+    for (const [k, v] of Object.entries(changes)) {
+      if (v === null) delete next[k]
+      else next[k] = v
+    }
+    this.ctx.sessionSettings = next
+    const flags = Object.fromEntries(Object.entries(changes).filter(([k]) => k !== PROMPT_SUGGESTIONS))
+    if (this.query && Object.keys(flags).length) await this.query.applyFlagSettings(flags as Parameters<Query['applyFlagSettings']>[0])
+  }
+
+  async sessionSettingOptions(): Promise<Record<string, { id: string; label: string }[]>> {
+    if (!this.query) return {}
+    const init = await this.query.initializationResult()
+    return { outputStyle: init.available_output_styles.map((s) => ({ id: s, label: s === 'default' ? 'Default' : s })) }
+  }
+
   async moveToBackground(toolCallId: string): Promise<boolean> {
     return (await this.query?.backgroundTasks(toolCallId)) ?? false
   }
@@ -836,6 +920,7 @@ export const claudeChat: ChatSupport = {
     forkFromTurn: true,
     background: true,
     limits: true,
+    sessionSettings: SESSION_SETTINGS,
     models: MODELS,
     modes: MODES
   },
