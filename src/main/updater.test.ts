@@ -8,7 +8,19 @@ vi.mock('electron', () => ({
 // As a dynamic import sees the CommonJS package: autoUpdater only on the default export
 const fakeUpdater = { checkForUpdates: () => null }
 vi.mock('electron-updater', () => ({ autoUpdater: undefined, default: { autoUpdater: fakeUpdater } }))
-const { isNewer, winUpdater } = await import('./updater')
+const { isNewer, winUpdater, describeUpdateError } = await import('./updater')
+
+describe('describeUpdateError', () => {
+  it('reads a release still being uploaded as such', () => {
+    const err = new Error('Cannot find latest.yml in the latest release artifacts (https://…/latest.yml): HttpError: 404\n"method: GET…')
+    expect(describeUpdateError(err)).toBe('The new version is still being published. Try again in a few minutes.')
+  })
+
+  it('keeps other errors to one short line', () => {
+    expect(describeUpdateError(new Error('getaddrinfo ENOTFOUND api.github.com'))).toBe('No connection to GitHub. Check the network and try again.')
+    expect(describeUpdateError(new Error('Something odd\n  at stack'))).toBe('Something odd')
+  })
+})
 
 describe('winUpdater', () => {
   it('finds autoUpdater on the default export', async () => {

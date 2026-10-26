@@ -45,6 +45,20 @@ function set(next: Partial<UpdateState>): void {
 
 export const getUpdateState = (): UpdateState => state
 
+/**
+ * One readable line instead of the updater's HTTP dump. A release whose files are
+ * still uploading answers 404, which only means "try again shortly".
+ */
+export function describeUpdateError(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err)
+  if (/latest(-mac)?\.yml|HttpError: 404|has no (installer|Windows update)/i.test(text)) {
+    return 'The new version is still being published. Try again in a few minutes.'
+  }
+  if (/ENOTFOUND|ECONNRESET|ETIMEDOUT|ENETUNREACH|fetch failed|net::/i.test(text)) return 'No connection to GitHub. Check the network and try again.'
+  const line = text.split('\n')[0].trim()
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line
+}
+
 /** Numeric x.y.z comparison; a leading "v" is ignored. */
 export function isNewer(candidate: string, current: string): boolean {
   const parse = (v: string): number[] => v.replace(/^v/, '').split('-')[0].split('.').map((n) => Number(n) || 0)
@@ -91,7 +105,7 @@ export async function checkForUpdates(): Promise<UpdateState> {
     // Windows fetches the installer in the background right away
     if (state.mode === 'install') void downloadUpdate()
   } catch (err) {
-    set({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+    set({ status: 'error', error: describeUpdateError(err) })
   }
   return state
 }
@@ -130,7 +144,7 @@ export async function downloadUpdate(): Promise<void> {
     downloadedDmg = target
     set({ status: 'ready', progress: 100 })
   } catch (err) {
-    set({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+    set({ status: 'error', error: describeUpdateError(err) })
   }
 }
 
