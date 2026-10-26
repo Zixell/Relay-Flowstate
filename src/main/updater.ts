@@ -55,10 +55,16 @@ export function isNewer(candidate: string, current: string): boolean {
   return false
 }
 
-/** electron-updater is loaded only where it is used, so macOS never starts Squirrel. */
-async function winUpdater(): Promise<typeof import('electron-updater').autoUpdater> {
-  const { autoUpdater } = await import('electron-updater')
-  return autoUpdater
+/**
+ * electron-updater is loaded only where it is used, so macOS never starts Squirrel.
+ * It is CommonJS and defines autoUpdater with a getter, which a dynamic import
+ * does not expose as a named export: it is on the default export instead.
+ */
+export async function winUpdater(): Promise<typeof import('electron-updater').autoUpdater> {
+  const mod = (await import('electron-updater')) as typeof import('electron-updater') & { default?: typeof import('electron-updater') }
+  const updater = mod.autoUpdater ?? mod.default?.autoUpdater
+  if (!updater) throw new Error('The updater did not load')
+  return updater
 }
 
 let winListeners = false

@@ -5,7 +5,16 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
   shell: {}
 }))
-const { isNewer } = await import('./updater')
+// As a dynamic import sees the CommonJS package: autoUpdater only on the default export
+const fakeUpdater = { checkForUpdates: () => null }
+vi.mock('electron-updater', () => ({ autoUpdater: undefined, default: { autoUpdater: fakeUpdater } }))
+const { isNewer, winUpdater } = await import('./updater')
+
+describe('winUpdater', () => {
+  it('finds autoUpdater on the default export', async () => {
+    expect(await winUpdater()).toBe(fakeUpdater)
+  })
+})
 
 describe('isNewer', () => {
   it('compares versions part by part', () => {
