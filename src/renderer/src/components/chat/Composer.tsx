@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal, PictureInPicture2 } from 'lucide-react'
+import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal, PictureInPicture2, Camera, Loader2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ChatCapabilities, SlashCommandInfo } from '../../types'
 import { SessionSettings } from './SessionSettings'
@@ -23,6 +23,8 @@ interface Props {
   onSessionSetting?: (key: string, value: string | boolean | null) => void
   /** Opens the chat in a floating window; absent inside one. */
   onFloat?: () => void
+  /** Attaches a screenshot of the screen (floating window only). */
+  onScreenshot?: () => Promise<{ mediaType: string; data: string } | { error: string }>
 }
 
 interface Attachment {
@@ -97,8 +99,25 @@ export function Composer({
   onModelChange,
   sessionSettings = {},
   onSessionSetting,
-  onFloat
+  onFloat,
+  onScreenshot
 }: Props) {
+  const [shooting, setShooting] = useState(false)
+  const [shotError, setShotError] = useState<string | null>(null)
+
+  const takeScreenshot = async (): Promise<void> => {
+    if (!onScreenshot) return
+    setShooting(true)
+    setShotError(null)
+    try {
+      const shot = await onScreenshot()
+      if ('error' in shot) setShotError(shot.error)
+      else setImages((prev) => [...prev, { ...shot, preview: `data:${shot.mediaType};base64,${shot.data}` }])
+    } finally {
+      setShooting(false)
+    }
+  }
+
   const [text, setText] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingDefs = onSessionSetting && taskId ? capabilities?.sessionSettings : undefined
@@ -244,6 +263,14 @@ export function Composer({
           ))}
         </div>
       )}
+      {shotError && (
+        <div className="flex items-start gap-2 px-3 pt-2.5 text-[11.5px] text-amber-300/90">
+          <span className="flex-1">{shotError}</span>
+          <button onClick={() => setShotError(null)} className="text-zinc-500 hover:text-zinc-300">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
       {images.length > 0 && (
         <div className="flex gap-2 px-3 pt-3">
           {images.map((img, i) => (
@@ -379,6 +406,16 @@ export function Composer({
             {Object.keys(sessionSettings).length > 0 && <span className="text-[10.5px]">{Object.keys(sessionSettings).length}</span>}
           </button>
         ) : null}
+        {onScreenshot && capabilities?.images && (
+          <button
+            onClick={() => void takeScreenshot()}
+            disabled={shooting}
+            title="Attach a screenshot of this screen"
+            className="h-7 w-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
+          >
+            {shooting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+          </button>
+        )}
         {onFloat && (
           <button
             onClick={onFloat}

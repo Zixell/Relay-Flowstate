@@ -662,6 +662,7 @@ export function ChatView({ task, compact }: Props) {
             sessionSettings={sessionSettings}
             onSessionSetting={(key, value) => void window.api.chat.setSessionSetting(task.id, key, value)}
             onFloat={compact || !window.api?.pip ? undefined : () => void window.api.pip.open(task.id)}
+            onScreenshot={compact && window.api?.pip ? () => window.api.pip.screenshot() : undefined}
           />
           <UsageBar usage={state.usage} costUsd={state.costUsd} />
         </div>

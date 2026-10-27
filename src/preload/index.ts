@@ -33,7 +33,9 @@ const api = {
     /** Opens the task's chat in a small window above all others. */
     open: (taskId: string) => ipcRenderer.invoke('pip:open', taskId),
     /** Brings the main window up on the task. */
-    showInMain: (taskId: string) => ipcRenderer.invoke('pip:showInMain', taskId)
+    showInMain: (taskId: string) => ipcRenderer.invoke('pip:showInMain', taskId),
+    /** A screenshot of the screen this window is on, without the window. */
+    screenshot: (): Promise<{ mediaType: string; data: string } | { error: string }> => ipcRenderer.invoke('pip:screenshot')
   },
 
   // Dialogs

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import {
   getAllProjects,
@@ -61,6 +61,7 @@ import { getAccountLimits, refreshLimits } from '../session/account-limits'
 import { checkForUpdates, downloadUpdate, getUpdateState, installUpdate } from '../updater'
 import { broadcast, showTaskInMain } from '../windows'
 import { closePip, openPip } from '../pip'
+import { captureScreenOf } from '../screenshot'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
@@ -372,6 +373,10 @@ export function registerIpcHandlers(): void {
   // --- Floating chat windows ---
   ipcMain.handle('pip:open', (_, taskId: string) => openPip(taskId))
   ipcMain.handle('pip:showInMain', (_, taskId: string) => showTaskInMain(taskId))
+  ipcMain.handle('pip:screenshot', (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    return win ? captureScreenOf(win) : { error: 'No window' }
+  })
 
   // --- Updates ---
   ipcMain.handle('updates:state', () => getUpdateState())
