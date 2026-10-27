@@ -361,11 +361,13 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
 
 interface Props {
   task: Task
+  /** Tighter spacing for the floating chat window. */
+  compact?: boolean
 }
 
 const MESSAGE_WINDOW = 150
 
-export function ChatView({ task }: Props) {
+export function ChatView({ task, compact }: Props) {
   const { state, turns, loading, send, interrupt, respondPermission, refreshTurns } = useChat(task.id)
   const agents = useAppStore((s) => s.agents)
   const updateTask = useAppStore((s) => s.updateTask)
@@ -588,7 +590,7 @@ export function ChatView({ task }: Props) {
         </button>
       )}
       <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
-        <div ref={contentRef} className="max-w-3xl mx-auto px-6 py-6 selectable">
+        <div ref={contentRef} className={cn('max-w-3xl mx-auto selectable', compact ? 'px-3 py-3' : 'px-6 py-6')}>
           {loading && (
             <div className="flex justify-center py-10">
               <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
@@ -634,7 +636,7 @@ export function ChatView({ task }: Props) {
       </div>
       </div>
 
-      <div className="shrink-0 px-6 pb-4 pt-2">
+      <div className={cn('shrink-0 pt-2', compact ? 'px-2 pb-2' : 'px-6 pb-4')}>
         <div className="max-w-3xl mx-auto">
           {limitHit && <LimitBanner task={task} />}
           <BackgroundPanel taskId={task.id} tasks={state.background} />

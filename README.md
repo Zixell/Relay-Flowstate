@@ -35,6 +35,7 @@ Agents whose CLI isn't on your PATH are shown as *not installed*. Sign in with e
 - Tool calls render as cards — commands with output, edits with a diff, searches, fetches, MCP tools.
 - Permission prompts with the agent's own options (allow once, always allow, deny); the composer switches permission mode and model per task.
 - Slash commands: type `/` for the agent's commands, skills and plugin commands.
+- **Float** (in the task header, or right-click a task → Float chat) opens the chat in a small window that stays above every other app — on macOS also over full-screen apps — to follow and answer the agent without switching back. One window per task; it remembers where you put it.
 - **Session settings** (the slider button under the composer, or `/config`): thinking, effort, output style, auto-compact, response language and next-message suggestions for this task's Claude session; Default keeps your own Claude config.
 - Usage under the composer: context fill, plan limits (5-hour / weekly), session cost; tokens per turn. **Settings → Usage limits** shows each account's limits at any time.
 - When an agent stops on its usage limit, the task continues by itself once the limit resets (one app-wide timer; cancel from the chat, turn off in Settings).

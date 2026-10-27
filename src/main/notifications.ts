@@ -1,16 +1,8 @@
 import { app, BrowserWindow, Notification } from 'electron'
 import { getBoolSetting } from './agents'
+import { showTaskInMain } from './windows'
 
 export const NOTIFICATIONS = 'RELAY_NOTIFICATIONS'
-
-function focusTask(taskId: string): void {
-  const win = BrowserWindow.getAllWindows()[0]
-  if (!win) return
-  if (win.isMinimized()) win.restore()
-  win.show()
-  win.focus()
-  win.webContents.send('app:selectTask', taskId)
-}
 
 /**
  * A system notification about a task, shown only while the app is in the
@@ -21,7 +13,7 @@ export function notifyTask(taskId: string, title: string, body: string): void {
   if (!getBoolSetting(NOTIFICATIONS, true) || !Notification.isSupported()) return
   if (BrowserWindow.getAllWindows().some((w) => w.isFocused())) return
   const n = new Notification({ title, body: body.length > 180 ? body.slice(0, 177) + '…' : body })
-  n.on('click', () => focusTask(taskId))
+  n.on('click', () => showTaskInMain(taskId))
   n.show()
 }
 

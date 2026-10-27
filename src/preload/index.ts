@@ -28,6 +28,14 @@ const api = {
     close: () => ipcRenderer.send('window:close')
   },
 
+  // Floating chat windows (see main/pip.ts)
+  pip: {
+    /** Opens the task's chat in a small window above all others. */
+    open: (taskId: string) => ipcRenderer.invoke('pip:open', taskId),
+    /** Brings the main window up on the task. */
+    showInMain: (taskId: string) => ipcRenderer.invoke('pip:showInMain', taskId)
+  },
+
   // Dialogs
   dialog: {
     openFolder: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFolder')

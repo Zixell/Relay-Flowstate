@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import {
   getAllProjects,
@@ -59,6 +59,8 @@ import { forkTask } from '../session/fork'
 import { cancelResume } from '../session/auto-resume'
 import { getAccountLimits, refreshLimits } from '../session/account-limits'
 import { checkForUpdates, downloadUpdate, getUpdateState, installUpdate } from '../updater'
+import { broadcast, showTaskInMain } from '../windows'
+import { closePip, openPip } from '../pip'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
 
@@ -84,10 +86,7 @@ function taskSourceBranch(task: { project_path: string; branch?: string | null; 
 }
 
 function emitTaskEvent(event: { id: string; task_id: string; type: string; content: string; metadata: string | null; timestamp?: number }): void {
-  const win = BrowserWindow.getAllWindows()[0]
-  if (win) {
-    win.webContents.send(`tasks:event:${event.task_id}`, event)
-  }
+  broadcast(`tasks:event:${event.task_id}`, event)
 }
 
 export function registerIpcHandlers(): void {
@@ -192,7 +191,7 @@ export function registerIpcHandlers(): void {
       sendMessage(id, { text: prompt }).catch((err) => {
         console.error('[relay] chat session failed to start:', err)
         updateTaskStatus(id, 'failed')
-        BrowserWindow.getAllWindows()[0]?.webContents.send('task:status', { taskId: id, status: 'failed' })
+        broadcast('task:status', { taskId: id, status: 'failed' })
       })
 
       return { id, projectId, title, prompt, processType, status: 'running', transport }
@@ -242,6 +241,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('tasks:getEvents', (_, taskId: string) => getTaskEvents(taskId))
   ipcMain.handle('tasks:delete', async (_, id: string) => {
     cancelResume(id)
+    closePip(id)
     closeConsole(id)
     await disposeSession(id)
     deleteAttachments(id)
@@ -368,6 +368,10 @@ export function registerIpcHandlers(): void {
   // --- Agents ---
   ipcMain.handle('agents:list', () => describeAgents())
   ipcMain.handle('limits:get', () => getAccountLimits())
+
+  // --- Floating chat windows ---
+  ipcMain.handle('pip:open', (_, taskId: string) => openPip(taskId))
+  ipcMain.handle('pip:showInMain', (_, taskId: string) => showTaskInMain(taskId))
 
   // --- Updates ---
   ipcMain.handle('updates:state', () => getUpdateState())

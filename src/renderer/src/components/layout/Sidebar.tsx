@@ -10,7 +10,8 @@ import {
   Trash2,
   Download,
   Star,
-  Pencil
+  Pencil,
+  PictureInPicture2
 } from 'lucide-react'
 import { cn, getProjectInitials } from '../../lib/utils'
 import { useAppStore, selectFilteredTasks } from '../../stores/appStore'
@@ -297,6 +298,15 @@ export function Sidebar({ className }: SidebarProps) {
               icon: <Star className="w-3.5 h-3.5" />,
               onClick: () => toggleStar(ctxMenu.taskId, !allTasks.find((t) => t.id === ctxMenu.taskId)?.starred)
             },
+            ...(isElectron
+              ? [
+                  {
+                    label: 'Float chat',
+                    icon: <PictureInPicture2 className="w-3.5 h-3.5" />,
+                    onClick: () => void window.api.pip.open(ctxMenu.taskId)
+                  }
+                ]
+              : []),
             {
               label: 'Rename',
               icon: <Pencil className="w-3.5 h-3.5" />,

@@ -1,7 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { net } from 'electron'
-import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initDatabase, resetRunningTasks, resetRunningTurns, convertLegacyTasks } from './db'
 import { disposeAllSessions, startAutoResume } from './session/manager'
 import { closeAllConsoles } from './console/manager'
@@ -10,6 +9,8 @@ import { loadSettings } from './settings'
 import { migrateAgentSettings } from './agents'
 import { adoptLoginShellPath } from './shell-path'
 import { startUpdateChecks } from './updater'
+import { getMainWindow, loadRenderer, setMainWindow } from './windows'
+import { closeAllPips } from './pip'
 
 // Lets tests and parallel dev instances run against their own database and worktrees.
 if (process.env.RELAY_USER_DATA) app.setPath('userData', process.env.RELAY_USER_DATA)
@@ -17,21 +18,6 @@ if (process.env.RELAY_USER_DATA) app.setPath('userData', process.env.RELAY_USER_
 // Before anything looks for agent CLIs: see them the way the user's terminal does.
 adoptLoginShellPath()
 
-/** Poll until the Vite dev server is accepting connections, then load it. */
-function waitAndLoadURL(win: BrowserWindow, url: string, retries = 20, delay = 300): void {
-  const attempt = () => {
-    const req = net.request(url)
-    req.on('response', () => {
-      win.loadURL(url)
-    })
-    req.on('error', () => {
-      if (retries-- > 0) setTimeout(attempt, delay)
-      else win.loadURL(url) // last resort — surface the real error
-    })
-    req.end()
-  }
-  attempt()
-}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -61,11 +47,10 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    waitAndLoadURL(mainWindow, process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  setMainWindow(mainWindow)
+  // Floating chats belong to the main window and go with it
+  mainWindow.on('closed', closeAllPips)
+  loadRenderer(mainWindow)
 
 }
 
@@ -121,7 +106,7 @@ app.whenReady().then(() => {
   startUpdateChecks()
 
   app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (!getMainWindow()) createWindow()
   })
 })
 
