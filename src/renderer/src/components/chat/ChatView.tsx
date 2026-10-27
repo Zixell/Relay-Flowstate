@@ -16,7 +16,8 @@ import {
   Activity,
   XCircle,
   Square,
-  X
+  X,
+  ArrowDown
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
@@ -401,11 +402,48 @@ export function ChatView({ task }: Props) {
     return null
   }, [state.messages])
 
+  const contentRef = useRef<HTMLDivElement>(null)
+  const lastScrollTop = useRef(0)
+  // Shown as the scroll-down button; `unseen` adds a dot when more came in meanwhile
+  const [away, setAway] = useState(false)
+  const [unseen, setUnseen] = useState(false)
+
   const onScroll = (): void => {
     const el = scrollRef.current
     if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) stickToBottom.current = true
+    // Only scrolling up lets go of the bottom: content that grows or is laid out
+    // late moves the bottom away without the user doing anything.
+    else if (el.scrollTop < lastScrollTop.current) stickToBottom.current = false
+    lastScrollTop.current = el.scrollTop
+    setAway(!stickToBottom.current)
+    if (stickToBottom.current) setUnseen(false)
   }
+
+  const scrollToBottom = (): void => {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottom.current = true
+    setAway(false)
+    setUnseen(false)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }
+
+  // Messages render lazily and images load late: keep the bottom in view as they grow
+  useEffect(() => {
+    const el = scrollRef.current
+    const content = contentRef.current
+    if (!el || !content) return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current && anchorHeight.current == null) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!stickToBottom.current) setUnseen(true)
+  }, [state.messages.length, state.streamingOrder.length])
 
   useLayoutEffect(() => {
     const el = scrollRef.current
@@ -421,6 +459,8 @@ export function ChatView({ task }: Props) {
 
   useEffect(() => {
     stickToBottom.current = true
+    setAway(false)
+    setUnseen(false)
     setWindowSize(MESSAGE_WINDOW)
   }, [task.id])
 
@@ -536,8 +576,19 @@ export function ChatView({ task }: Props) {
   return (
     <div className="flex flex-col h-full">
       {viewerSrc && <ImageViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-6 py-6 selectable">
+      <div className="relative flex-1 min-h-0">
+      {away && (
+        <button
+          onClick={scrollToBottom}
+          title="Scroll to the latest"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 h-8 w-8 flex items-center justify-center rounded-full border border-white/10 bg-[#1a1a1a]/95 text-zinc-300 shadow-lg hover:text-white hover:bg-[#222]"
+        >
+          <ArrowDown className="w-4 h-4" />
+          {unseen && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-blue-500 border-2 border-[#0a0a0a]" />}
+        </button>
+      )}
+      <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto">
+        <div ref={contentRef} className="max-w-3xl mx-auto px-6 py-6 selectable">
           {loading && (
             <div className="flex justify-center py-10">
               <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
@@ -580,6 +631,7 @@ export function ChatView({ task }: Props) {
             </div>
           )}
         </div>
+      </div>
       </div>
 
       <div className="shrink-0 px-6 pb-4 pt-2">
