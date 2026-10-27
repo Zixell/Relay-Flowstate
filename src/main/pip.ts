@@ -53,6 +53,8 @@ export function openPip(taskId: string): void {
 
   const win = new BrowserWindow({
     ...placement(),
+    // Shown once it is set up to float, so it never flashes as an ordinary window
+    show: false,
     minWidth: 320,
     minHeight: 280,
     frame: false,
@@ -67,10 +69,16 @@ export function openPip(taskId: string): void {
       contextIsolation: true
     }
   })
-  // Above ordinary windows on Windows and macOS; on macOS also on every Space
-  // and over full-screen apps.
-  win.setAlwaysOnTop(true, 'floating')
-  if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  if (process.platform === 'darwin') {
+    // Like a video's picture-in-picture: on every Space, including other apps'
+    // full-screen ones, so it stays put while swiping between them. The
+    // 'floating' level stays behind a full-screen app; 'screen-saver' does not.
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    win.setAlwaysOnTop(true, 'screen-saver')
+  } else {
+    win.setAlwaysOnTop(true, 'floating')
+  }
+  win.once('ready-to-show', () => win.show())
 
   win.webContents.setWindowOpenHandler((details) => {
     void shell.openExternal(details.url)

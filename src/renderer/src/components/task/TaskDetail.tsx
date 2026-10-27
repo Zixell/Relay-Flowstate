@@ -16,8 +16,7 @@ import {
   Copy,
   Check,
   Sparkles,
-  Pencil,
-  PictureInPicture2
+  Pencil
 } from 'lucide-react'
 import { cn, formatDuration, formatRelativeTime, truncatePath } from '../../lib/utils'
 import { STATUS_CONFIG, type Task } from '../../types'
@@ -270,16 +269,6 @@ export function TaskDetail({ task }: TaskDetailProps) {
                   <MessageSquare className="w-3 h-3" />
                   Respond to Agent
                 </Button>
-              )}
-              {isElectron && (
-                <button
-                  onClick={() => void window.api.pip.open(task.id)}
-                  title="Float this chat above other windows"
-                  className="flex items-center gap-1.5 px-2.5 h-8 rounded-lg text-xs font-medium border border-white/[0.08] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04] transition-colors"
-                >
-                  <PictureInPicture2 className="w-3.5 h-3.5" />
-                  Float
-                </button>
               )}
               {isElectron && task.worktree_path && (
                 <button

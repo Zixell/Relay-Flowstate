@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal } from 'lucide-react'
+import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal, PictureInPicture2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ChatCapabilities, SlashCommandInfo } from '../../types'
 import { SessionSettings } from './SessionSettings'
@@ -21,6 +21,8 @@ interface Props {
   /** The task's session settings (the chat's /config); absent keys follow the agent's own config. */
   sessionSettings?: Record<string, string | boolean>
   onSessionSetting?: (key: string, value: string | boolean | null) => void
+  /** Opens the chat in a floating window; absent inside one. */
+  onFloat?: () => void
 }
 
 interface Attachment {
@@ -94,7 +96,8 @@ export function Composer({
   onModeChange,
   onModelChange,
   sessionSettings = {},
-  onSessionSetting
+  onSessionSetting,
+  onFloat
 }: Props) {
   const [text, setText] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -376,6 +379,15 @@ export function Composer({
             {Object.keys(sessionSettings).length > 0 && <span className="text-[10.5px]">{Object.keys(sessionSettings).length}</span>}
           </button>
         ) : null}
+        {onFloat && (
+          <button
+            onClick={onFloat}
+            title="Float this chat above other windows"
+            className="h-7 w-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05]"
+          >
+            <PictureInPicture2 className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         <div className="ml-auto flex items-center gap-1.5">
           {inTurn && (
