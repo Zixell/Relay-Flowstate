@@ -457,12 +457,14 @@ function BrowserStep({
             if (code.trim()) onCode(code.trim())
           }}
         >
-          <label className="text-[11.5px] text-zinc-400">The page shows a code instead? Paste it here:</label>
+          <label className="text-[11.5px] text-zinc-400 leading-relaxed">
+            Browser didn't come back to the app? Paste the code the page shows, or the whole address from the address bar:
+          </label>
           <div className="flex gap-2">
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Authentication code"
+              placeholder="Code or http://…/callback?code=…"
               spellCheck={false}
               className="flex-1 min-w-0 h-8 px-3 rounded-lg bg-black/40 border border-white/10 focus:border-white/25 outline-none text-[12px] font-mono text-zinc-100 placeholder:text-zinc-600"
             />

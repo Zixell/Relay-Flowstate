@@ -92,3 +92,19 @@ export function lastLine(text: string): string | undefined {
     .filter(Boolean)
     .pop()
 }
+
+/**
+ * What the user pasted after a browser sign-in: the bare code, or the whole
+ * address the browser was sent back to (when that page failed to load).
+ */
+export function parsePastedCode(text: string): { code: string; state?: string } {
+  const trimmed = text.trim()
+  try {
+    const url = new URL(trimmed)
+    const code = url.searchParams.get('code')
+    if (code) return { code, state: url.searchParams.get('state') ?? undefined }
+  } catch {
+    // not an address
+  }
+  return { code: trimmed }
+}

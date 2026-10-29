@@ -1,5 +1,5 @@
 import type { AgentAuth, AuthStatus, LoginUpdate } from './types'
-import { lastLine, runCli, spawnInPty, stripAnsi } from './cli-auth'
+import { lastLine, parsePastedCode, runCli, spawnInPty, stripAnsi } from './cli-auth'
 
 /**
  * Claude Code sign-in through `claude auth`. Login runs in a hidden terminal:
@@ -85,8 +85,10 @@ export const claudeAuth: AgentAuth = {
     onUpdate({ stage: 'starting' })
 
     return {
-      submitCode(code) {
-        proc.write(code.trim())
+      submitCode(text) {
+        // The CLI takes the code page's `code#state`; an address the browser was sent back to carries both.
+        const { code, state } = parsePastedCode(text)
+        proc.write(state ? `${code}#${state}` : code)
         setTimeout(() => proc.write('\r'), 100)
       },
       cancel() {

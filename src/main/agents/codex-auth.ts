@@ -3,6 +3,7 @@ import { shell } from 'electron'
 import type { AgentAuth, AuthStatus, LoginUpdate } from './types'
 import { RpcError, type JsonRpcProcess } from './jsonrpc'
 import { startAppServer, withAppServer } from './codex-chat'
+import { parsePastedCode } from './cli-auth'
 
 /** Codex sign-in through the app-server's `account/*` API. */
 
@@ -40,6 +41,7 @@ export const codexAuth: AgentAuth = {
   login(methodId, input, onUpdate) {
     let rpc: JsonRpcProcess | null = null
     let loginId: string | null = null
+    let authUrl: URL | null = null
     let finished = false
     const finish = (u: LoginUpdate): void => {
       if (finished) return
@@ -70,7 +72,8 @@ export const codexAuth: AgentAuth = {
       const res = await rpc.request<LoginResponse>('account/login/start', params)
       if (res.type === 'chatgpt') {
         loginId = res.loginId
-        onUpdate({ stage: 'browser', url: res.authUrl, acceptsCode: false })
+        authUrl = new URL(res.authUrl)
+        onUpdate({ stage: 'browser', url: res.authUrl, acceptsCode: true })
         void shell.openExternal(res.authUrl)
       } else if (res.type === 'chatgptDeviceCode') {
         loginId = res.loginId
@@ -83,6 +86,22 @@ export const codexAuth: AgentAuth = {
     onUpdate({ stage: 'starting' })
 
     return {
+      // When the browser could not reach Codex's local callback server (another
+      // machine, a firewall), the code from its address bar is handed over here.
+      submitCode(text) {
+        const redirect = authUrl?.searchParams.get('redirect_uri')
+        const expected = authUrl?.searchParams.get('state')
+        if (!redirect || !expected) return
+        const { code, state } = parsePastedCode(text)
+        if (state && state !== expected) {
+          return finish({ stage: 'error', message: 'That address is from an earlier sign-in. Start again and use the newest one.' })
+        }
+        const callback = new URL(redirect)
+        callback.searchParams.set('code', code)
+        callback.searchParams.set('state', expected)
+        // Codex reports the outcome with account/login/completed.
+        fetch(callback).catch((err) => finish({ stage: 'error', message: `Could not reach Codex: ${err instanceof Error ? err.message : err}` }))
+      },
       cancel() {
         if (finished) return
         finished = true
