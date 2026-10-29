@@ -5,6 +5,7 @@ import { STATUS_CONFIG } from '../../types'
 import { useAppStore } from '../../stores/appStore'
 import { useTaskSync } from '../../hooks/useTaskSync'
 import { ChatView } from '../chat/ChatView'
+import { SignInHost } from '../modals/SignInDialog'
 
 const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
@@ -57,6 +58,7 @@ export function PipApp({ taskId }: { taskId: string }) {
           </div>
         )}
       </div>
+      <SignInHost />
     </div>
   )
 }

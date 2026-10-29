@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download } from 'lucide-react'
+import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download, LogIn } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import type { AgentDescriptor, AgentSettingDef, RateLimitInfo } from '../../types'
 import { useUpdates } from '../../hooks/useUpdates'
+import { describeStatus, StatusDot, useAuthStatus } from './SignInDialog'
 
 const isElectron = typeof window !== 'undefined' && !!window.api
 
@@ -154,16 +155,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">Agent CLIs</span>
+              <span className="text-sm font-medium text-zinc-200">Agents & accounts</span>
             </div>
             <p className="text-xs text-zinc-500 leading-relaxed">
-              Agents run through your own installed CLI and its login. Session summaries
-              are generated locally by whichever agent CLI is installed.
+              Agents run through your own installed CLI and its account. Sign in here
+              instead of the agent's terminal. Session summaries are generated locally
+              by whichever agent CLI is installed.
             </p>
 
             <div className="flex flex-col gap-2">
               {selectable.map((agent) => (
-                <AgentStatusRow key={agent.id} agent={agent} />
+                <AgentStatusRow key={agent.id} agent={agent} open={open} />
               ))}
             </div>
           </div>
@@ -383,34 +385,58 @@ function UsageLimits({ agents, open }: { agents: AgentDescriptor[]; open: boolea
   )
 }
 
-function AgentStatusRow({ agent }: { agent: AgentDescriptor }) {
+function AgentStatusRow({ agent, open }: { agent: AgentDescriptor; open: boolean }) {
+  const openSignIn = useAppStore((s) => s.openSignIn)
+  const signInOpen = useAppStore((s) => s.signInAgentId === agent.id)
+  const { status, refresh } = useAuthStatus(agent.available && open ? agent.id : null)
+
+  // The dialog closing may mean a new sign-in
+  useEffect(() => {
+    if (!signInOpen && agent.available && open) void refresh()
+  }, [signInOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!agent.available) {
+    return (
+      <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border bg-white/[0.02] border-white/[0.06]">
+        <XCircle className="w-4 h-4 text-zinc-600 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-zinc-400">{agent.label} not found</p>
+          <p className="text-[11px] text-zinc-600 mt-0.5">Install {agent.label} to run tasks with it</p>
+        </div>
+      </div>
+    )
+  }
+
+  const needsSignIn = status?.signedIn === false
   return (
-    <div className={cn(
-      'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border',
-      agent.available
-        ? 'bg-emerald-400/5 border-emerald-400/20'
-        : 'bg-red-400/5 border-red-400/20'
-    )}>
-      {agent.available
-        ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-        : <XCircle className="w-4 h-4 text-red-400 shrink-0" />}
-      <div className="min-w-0">
-        <p className={cn(
-          'text-xs font-medium',
-          agent.available ? 'text-emerald-400' : 'text-red-400'
-        )}>
-          {agent.label} {agent.available ? 'detected' : 'not found'}
+    <div
+      className={cn(
+        'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border',
+        needsSignIn ? 'bg-amber-400/[0.04] border-amber-400/20' : 'bg-white/[0.02] border-white/[0.06]'
+      )}
+    >
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: agent.color }} />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-zinc-200 flex items-center gap-1.5">
+          {agent.label}
+          {status?.signedIn && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
         </p>
-        <p className="text-[11px] text-zinc-500 mt-0.5">
-          {agent.available
-            ? [
-                agent.chat?.images ? 'images' : null,
-                agent.chat?.forkFromTurn ? 'fork from any turn' : null,
-                agent.supportsSummaries ? 'summaries' : null
-              ].filter(Boolean).join(' · ') || 'ready'
-            : `Install ${agent.label} to run tasks with it`}
+        <p className={cn('text-[11px] mt-0.5 truncate', needsSignIn ? 'text-amber-300/80' : 'text-zinc-500')}>
+          <StatusDot status={status} /> {describeStatus(status)}
         </p>
       </div>
+      {agent.loginMethods.length > 0 && (
+        <button
+          onClick={() => openSignIn(agent.id)}
+          className={cn(
+            'h-7 px-3 rounded-lg text-[11.5px] font-medium shrink-0 flex items-center gap-1.5 transition-colors',
+            needsSignIn ? 'bg-white text-zinc-900 hover:bg-zinc-200' : 'border border-white/10 text-zinc-300 hover:bg-white/[0.06]'
+          )}
+        >
+          <LogIn className="w-3 h-3" />
+          {status?.signedIn ? 'Account' : 'Sign in'}
+        </button>
+      )}
     </div>
   )
 }

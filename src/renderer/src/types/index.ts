@@ -29,6 +29,24 @@ export interface AgentDescriptor {
   /** Present when the agent can run in chat mode. */
   chat?: ChatCapabilities
   settings: AgentSettingDef[]
+  /** Ways to sign in to the agent's account from the app. */
+  loginMethods: LoginMethod[]
+  canLogout: boolean
+}
+
+/** Mirrors `LoginMethod` in main/agents/types.ts. */
+export interface LoginMethod {
+  id: string
+  label: string
+  description: string
+  kind: 'browser' | 'device' | 'apiKey' | 'terminal'
+}
+
+/** Whether an agent's CLI is signed in; `signedIn: null` when it cannot tell. */
+export interface AuthStatus {
+  signedIn: boolean | null
+  account?: string
+  detail?: string
 }
 
 export interface ChatCapabilities {

@@ -7,6 +7,7 @@ import { TaskDetail } from '../task/TaskDetail'
 import { CreateTaskModal } from '../modals/CreateTaskModal'
 import { SettingsModal } from '../modals/SettingsModal'
 import { ImportSessionsModal } from '../modals/ImportSessionsModal'
+import { SignInHost } from '../modals/SignInDialog'
 
 export function Layout() {
   const selectedTask = useAppStore(selectSelectedTask)
@@ -32,6 +33,7 @@ export function Layout() {
       <CreateTaskModal open={isCreateModalOpen} onClose={closeCreateModal} />
       <SettingsModal open={isSettingsOpen} onClose={closeSettings} />
       <ImportSessionsModal open={isImportOpen} onClose={closeImport} />
+      <SignInHost />
     </div>
   )
 }

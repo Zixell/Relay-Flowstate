@@ -12,7 +12,9 @@ const FALLBACK_AGENTS: AgentDescriptor[] = ['claude-code', 'codex'].map((id) => 
   enabled: true,
   available: false,
   supportsSummaries: true,
-  settings: []
+  settings: [],
+  loginMethods: [],
+  canLogout: false
 }))
 
 interface AppState {
@@ -29,6 +31,8 @@ interface AppState {
   isCreateModalOpen: boolean
   isSettingsOpen: boolean
   isImportOpen: boolean
+  /** Agent whose sign-in dialog is open. */
+  signInAgentId: string | null
   isLoading: boolean
 
   // Actions
@@ -46,6 +50,8 @@ interface AppState {
   closeSettings: () => void
   openImport: () => void
   closeImport: () => void
+  openSignIn: (agentId: string) => void
+  closeSignIn: () => void
   addTask: (task: Task) => void
   updateTask: (id: string, updates: Partial<Task>) => void
   deleteTask: (id: string) => void
@@ -70,6 +76,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isCreateModalOpen: false,
   isSettingsOpen: false,
   isImportOpen: false,
+  signInAgentId: null,
   isLoading: false,
 
   setTasks: (tasks) => set({ tasks }),
@@ -91,6 +98,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeSettings: () => set({ isSettingsOpen: false }),
   openImport: () => set({ isImportOpen: true }),
   closeImport: () => set({ isImportOpen: false }),
+  openSignIn: (signInAgentId) => set({ signInAgentId }),
+  closeSignIn: () => set({ signInAgentId: null }),
 
   addTask: (task) =>
     set((s) => ({ tasks: [task, ...s.tasks.filter((t) => t.id !== task.id)] })),

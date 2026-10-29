@@ -1,5 +1,24 @@
-import type { AgentDefinition } from './types'
+import { existsSync } from 'fs'
+import { homedir } from 'os'
+import { join } from 'path'
+import type { AgentAuth, AgentCommand, AgentDefinition, AuthStatus } from './types'
 import { createAcpChat } from './acp-chat'
+
+/** These CLIs sign in only interactively: the app runs the command in a terminal. */
+function terminalAuth(terminal: AgentCommand, description: string, status?: () => AuthStatus): AgentAuth {
+  return {
+    methods: [{ id: 'terminal', label: 'Sign in in the terminal', description, kind: 'terminal' }],
+    status: async () => status?.() ?? { signedIn: null },
+    terminal
+  }
+}
+
+/** Gemini keeps its Google sign-in in ~/.gemini; an API key may come from the environment instead. */
+function geminiStatus(): AuthStatus {
+  if (existsSync(join(homedir(), '.gemini', 'oauth_creds.json'))) return { signedIn: true, detail: 'Google account' }
+  if (process.env.GEMINI_API_KEY) return { signedIn: true, detail: 'Gemini API key' }
+  return { signedIn: null }
+}
 
 /**
  * Agents integrated through the Agent Client Protocol: each runs as an ACP
@@ -24,6 +43,12 @@ export const geminiAgent: AgentDefinition = {
     loginHint: 'Run `gemini` once in a terminal and sign in.'
   }),
 
+  auth: terminalAuth(
+    { cmd: 'gemini', args: [] },
+    'Gemini asks how to sign in: Google account, Gemini API key or Vertex AI. Type /quit when done.',
+    geminiStatus
+  ),
+
   settings: []
 }
 
@@ -45,6 +70,8 @@ export const openCodeAgent: AgentDefinition = {
     loginHint: 'Run `opencode auth login` in a terminal to connect a model provider.'
   }),
 
+  auth: terminalAuth({ cmd: 'opencode', args: ['auth', 'login'] }, 'Pick a model provider and sign in to it or paste its API key.'),
+
   settings: []
 }
 
@@ -65,6 +92,8 @@ export const gooseAgent: AgentDefinition = {
     args: ['acp'],
     loginHint: 'Run `goose configure` in a terminal to set up a model provider.'
   }),
+
+  auth: terminalAuth({ cmd: 'goose', args: ['configure'] }, 'Choose a model provider and enter its credentials.'),
 
   settings: []
 }

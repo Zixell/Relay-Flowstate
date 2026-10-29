@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron'
 import type { IPty } from 'node-pty'
+import { cliEnv, viaShim } from '../agents/cli-auth'
 
 /**
  * Sidecar console: a plain shell opened in a task's worktree, like an IDE's
@@ -28,8 +29,17 @@ function send(channel: string, payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
 }
 
-/** Opens (or re-attaches to) the task's console. Returns its scrollback. */
-export function openConsole(taskId: string, cwd: string, cols: number, rows: number): { available: boolean; scrollback: string } {
+/**
+ * Opens (or re-attaches to) the task's console. Returns its scrollback.
+ * With `command`, runs that program instead of the shell (an agent's sign-in).
+ */
+export function openConsole(
+  taskId: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  command?: { file: string; args: string[]; onExit?: () => void }
+): { available: boolean; scrollback: string } {
   const existing = consoles.get(taskId)
   if (existing) {
     existing.proc.resize(cols, rows)
@@ -38,12 +48,13 @@ export function openConsole(taskId: string, cwd: string, cols: number, rows: num
   if (!pty) return { available: false, scrollback: '' }
 
   const shell = process.platform === 'win32' ? 'powershell.exe' : process.env.SHELL || '/bin/zsh'
-  const proc = pty.spawn(shell, process.platform === 'win32' ? [] : ['-l'], {
+  const program = command ? viaShim(command.file, command.args) : { file: shell, args: process.platform === 'win32' ? [] : ['-l'] }
+  const proc = pty.spawn(program.file, program.args, {
     name: 'xterm-256color',
     cols,
     rows,
     cwd,
-    env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
+    env: { ...(command ? cliEnv(command.file) : process.env), TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
   })
   const session: ConsoleSession = { proc, scrollback: '' }
   consoles.set(taskId, session)
@@ -53,8 +64,9 @@ export function openConsole(taskId: string, cwd: string, cols: number, rows: num
     send(`console:data:${taskId}`, data)
   })
   proc.onExit(() => {
-    consoles.delete(taskId)
+    if (consoles.get(taskId) === session) consoles.delete(taskId)
     send(`console:exit:${taskId}`, null)
+    command?.onExit?.()
   })
   return { available: true, scrollback: '' }
 }

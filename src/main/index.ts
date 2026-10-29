@@ -4,6 +4,7 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { initDatabase, resetRunningTasks, resetRunningTurns, convertLegacyTasks } from './db'
 import { disposeAllSessions, startAutoResume } from './session/manager'
 import { closeAllConsoles } from './console/manager'
+import { cancelAllLogins } from './session/sign-in'
 import { registerIpcHandlers } from './ipc/handlers'
 import { loadSettings } from './settings'
 import { migrateAgentSettings } from './agents'
@@ -113,6 +114,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   void disposeAllSessions()
   closeAllConsoles()
+  cancelAllLogins()
 })
 
 app.on('window-all-closed', () => {

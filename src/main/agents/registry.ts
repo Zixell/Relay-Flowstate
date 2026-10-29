@@ -34,6 +34,7 @@ export const FALLBACK_AGENT: AgentDefinition = {
   binary: 'false',
   versionArgs: [],
   settings: [],
+  auth: { methods: [], status: async () => ({ signedIn: null }) },
   chat: {
     capabilities: { resume: false, interrupt: false, permissions: false, images: false },
     createSession: () => {
@@ -114,7 +115,9 @@ export function describeAgents(): AgentDescriptor[] {
     available: a.enabled ? isAgentAvailable(a.id) : false,
     supportsSummaries: Boolean(a.headless),
     chat: a.chat.capabilities,
-    settings: a.settings
+    settings: a.settings,
+    loginMethods: a.auth.methods,
+    canLogout: Boolean(a.auth.logout)
   }))
 }
 

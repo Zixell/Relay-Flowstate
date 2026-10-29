@@ -29,6 +29,7 @@ import { PermissionPrompt } from './PermissionPrompt'
 import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
 import { HandoffDivider, LimitBanner, hitUsageLimit, resumeAtOf } from './AgentSwitch'
+import { SignInBanner, needsSignIn } from './SignInBanner'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -472,13 +473,16 @@ export function ChatView({ task, compact }: Props) {
     setWindowSize((n) => n + MESSAGE_WINDOW)
   }
 
+  const openSignIn = useAppStore((s) => s.openSignIn)
   const handleSend = useCallback(
     (text: string, images: { mediaType: string; data: string }[]) => {
+      // The agents' own /login needs their terminal; the app signs in instead
+      if (text.trim() === '/login' && !images.length) return openSignIn(task.process_type)
       stickToBottom.current = true
       updateTask(task.id, { status: 'running', updated_at: Math.floor(Date.now() / 1000) })
       void send(text, images)
     },
-    [send, task.id, updateTask]
+    [send, task.id, task.process_type, updateTask, openSignIn]
   )
 
   const handleRevert = useCallback(
@@ -518,6 +522,7 @@ export function ChatView({ task, compact }: Props) {
     return last?.kind === 'error' ? last.content : null
   }, [state.messages])
   const limitHit = !state.inTurn && (hitUsageLimit(lastError, state.usage?.limits) || resumeAtOf(task) !== undefined)
+  const signInNeeded = useMemo(() => !state.inTurn && needsSignIn(state.messages[state.messages.length - 1]), [state.inTurn, state.messages])
   const handoffSuggestion = handoff?.pending ? `Continue where ${handoff.fromLabel} stopped.` : null
 
   const handleFork = useCallback(
@@ -639,6 +644,7 @@ export function ChatView({ task, compact }: Props) {
       <div className={cn('shrink-0 pt-2', compact ? 'px-2 pb-2' : 'px-6 pb-4')}>
         <div className="max-w-3xl mx-auto">
           {limitHit && <LimitBanner task={task} />}
+          {signInNeeded && !limitHit && <SignInBanner agentId={task.process_type} />}
           <BackgroundPanel taskId={task.id} tasks={state.background} />
           <PlanPanel items={state.plan} />
           <Composer

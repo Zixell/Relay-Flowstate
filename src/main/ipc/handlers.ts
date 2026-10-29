@@ -64,6 +64,7 @@ import { closePip, openPip } from '../pip'
 import { captureScreenOf } from '../screenshot'
 import { suggestFiles } from '../git/files'
 import { openConsole, writeConsole, resizeConsole, closeConsole } from '../console/manager'
+import { authStatus, cancelLogin, loginTerminalId, logout, openLoginTerminal, startLogin, submitLoginCode } from '../session/sign-in'
 
 function worktreeIssueText(issue?: string): string {
   if (issue === 'not-git') return 'the project is not a git repository'
@@ -327,6 +328,19 @@ export function registerIpcHandlers(): void {
     resizeConsole(taskId, cols, rows)
   )
   ipcMain.handle('console:close', (_, taskId: string) => closeConsole(taskId))
+
+  // --- Signing in to agent accounts ---
+  ipcMain.handle('auth:status', (_, agentId: string) => authStatus(agentId))
+  ipcMain.handle('auth:login', (_, { agentId, methodId, apiKey }: { agentId: string; methodId: string; apiKey?: string }) =>
+    startLogin(agentId, methodId, { apiKey })
+  )
+  ipcMain.handle('auth:code', (_, { flowId, code }: { flowId: string; code: string }) => submitLoginCode(flowId, code))
+  ipcMain.handle('auth:cancel', (_, flowId: string) => cancelLogin(flowId))
+  ipcMain.handle('auth:logout', (_, agentId: string) => logout(agentId))
+  ipcMain.handle('auth:terminal', (_, { agentId, cols, rows }: { agentId: string; cols: number; rows: number }) => ({
+    id: loginTerminalId(agentId),
+    ...openLoginTerminal(agentId, cols, rows)
+  }))
 
   // --- Sessions started outside the app (agent CLIs) ---
   ipcMain.handle('sessions:listExternal', () => listImportableSessions())

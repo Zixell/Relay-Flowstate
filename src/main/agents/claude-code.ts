@@ -1,5 +1,6 @@
 import type { AgentDefinition } from './types'
 import { claudeChat, DEFAULT_MODE, MODE_OPTIONS } from './claude-chat'
+import { claudeAuth } from './claude-auth'
 
 /**
  * Anthropic's Claude Code, driven through the Claude Agent SDK with the
@@ -34,6 +35,8 @@ export const claudeCodeAgent: AgentDefinition = {
   },
 
   chat: claudeChat,
+
+  auth: claudeAuth,
 
   settings: [
     {

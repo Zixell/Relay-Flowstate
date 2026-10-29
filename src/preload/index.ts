@@ -17,6 +17,25 @@ interface AccountLimits {
   updatedAt: number
 }
 
+/** Whether an agent's CLI is signed in (see main/agents/types.ts). */
+interface AuthStatus {
+  signedIn: boolean | null
+  account?: string
+  detail?: string
+}
+
+/** Progress of a sign-in started with `auth.login`. */
+interface AuthUpdate {
+  flowId: string
+  agentId: string
+  update:
+    | { stage: 'starting' }
+    | { stage: 'browser'; url?: string; acceptsCode: boolean }
+    | { stage: 'device'; url: string; code: string }
+    | { stage: 'done' }
+    | { stage: 'error'; message: string }
+}
+
 const api = {
   /** Host OS — macOS draws native window controls, other platforms use ours. */
   platform: process.platform,
@@ -231,6 +250,27 @@ const api = {
       ipcRenderer.on('task:status', listener)
       return () => {
         ipcRenderer.removeListener('task:status', listener)
+      }
+    }
+  },
+
+  // Signing in to agent accounts (see main/session/sign-in.ts)
+  auth: {
+    status: (agentId: string): Promise<AuthStatus> => ipcRenderer.invoke('auth:status', agentId),
+    /** Starts an in-app sign-in; progress arrives on `onUpdate`. Returns the flow id. */
+    login: (agentId: string, methodId: string, apiKey?: string): Promise<string> =>
+      ipcRenderer.invoke('auth:login', { agentId, methodId, apiKey }),
+    submitCode: (flowId: string, code: string) => ipcRenderer.invoke('auth:code', { flowId, code }),
+    cancel: (flowId: string) => ipcRenderer.invoke('auth:cancel', flowId),
+    logout: (agentId: string) => ipcRenderer.invoke('auth:logout', agentId),
+    /** Runs the agent's interactive sign-in in a console; use `console.*` with the returned id. */
+    openTerminal: (agentId: string, cols: number, rows: number): Promise<{ id: string; available: boolean; scrollback: string }> =>
+      ipcRenderer.invoke('auth:terminal', { agentId, cols, rows }),
+    onUpdate: (callback: (payload: AuthUpdate) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, payload: AuthUpdate) => callback(payload)
+      ipcRenderer.on('auth:update', listener)
+      return () => {
+        ipcRenderer.removeListener('auth:update', listener)
       }
     }
   },

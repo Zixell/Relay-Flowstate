@@ -1,5 +1,6 @@
 import type { AgentDefinition } from './types'
 import { codexChat, CODEX_DEFAULT_MODE, CODEX_MODE_OPTIONS } from './codex-chat'
+import { codexAuth } from './codex-auth'
 
 /**
  * Extracts the final assistant message from `codex exec --json` output.
@@ -59,6 +60,8 @@ export const codexAgent: AgentDefinition = {
   versionArgs: ['--version'],
 
   chat: codexChat,
+
+  auth: codexAuth,
 
   headless: {
     cmd: 'codex',

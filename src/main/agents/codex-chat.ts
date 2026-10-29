@@ -163,7 +163,7 @@ function gitCommonDir(cwd: string): string | null {
 }
 
 /** Spawns `codex app-server` and completes the initialize handshake. */
-async function startAppServer(
+export async function startAppServer(
   cwd: string,
   handlers: Omit<RpcHandlers, 'onStderr'>
 ): Promise<JsonRpcProcess> {
@@ -189,7 +189,7 @@ async function startAppServer(
 }
 
 /** A short-lived app-server for one-off requests (listing, reading, forking threads). */
-async function withAppServer<T>(fn: (rpc: JsonRpcProcess) => Promise<T>): Promise<T> {
+export async function withAppServer<T>(fn: (rpc: JsonRpcProcess) => Promise<T>): Promise<T> {
   const rpc = await startAppServer(homedir(), {
     onNotification: () => {},
     onRequest: () => Promise.reject(new RpcError('Not supported', -32601)),

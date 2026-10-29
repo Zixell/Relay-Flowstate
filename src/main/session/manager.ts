@@ -666,6 +666,15 @@ export async function disposeSession(taskId: string): Promise<void> {
   await s.session.dispose()
 }
 
+/**
+ * Restarts the agent's idle sessions after a sign-in, so they pick up the new
+ * credentials; each resumes its conversation with the next message.
+ */
+export async function restartIdleSessions(agentId: string): Promise<void> {
+  const idle = [...live.values()].filter((s) => !s.status.inTurn && (getTaskById(s.taskId) as TaskRow | null)?.process_type === agentId)
+  await Promise.all(idle.map((s) => disposeSession(s.taskId)))
+}
+
 export async function disposeAllSessions(): Promise<void> {
   await Promise.all([...live.keys()].map(disposeSession))
 }
