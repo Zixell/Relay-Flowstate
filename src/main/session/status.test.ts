@@ -56,4 +56,30 @@ describe('reduceStatus', () => {
     const s = run([{ type: 'turn.started', turnId: 't' }, { type: 'session.exited', code: 1 }])
     expect(s.status).toBe('failed')
   })
+
+  const agents = (...statuses: ('running' | 'completed')[]): AgentEvent => ({
+    type: 'background.updated',
+    tasks: statuses.map((status, i) => ({ id: `a${i}`, type: 'agent · general-purpose', description: 'Review', status }))
+  })
+
+  it('keeps working while subagents run after the turn', () => {
+    let s = run([{ type: 'turn.started', turnId: 't' }, agents('running', 'running'), { type: 'turn.completed', turnId: 't', reason: 'end_turn' }])
+    expect(s.status).toBe('running')
+    expect(s.inTurn).toBe(false)
+    s = reduceStatus(s, agents('completed', 'running'))
+    expect(s.status).toBe('running')
+    s = reduceStatus(s, agents('completed', 'completed'))
+    expect(s.status).toBe('completed')
+  })
+
+  it('does not count background shells as work', () => {
+    const shell: AgentEvent = { type: 'background.updated', tasks: [{ id: 's', type: 'shell', description: 'npm run dev', status: 'running' }] }
+    expect(run([{ type: 'turn.started', turnId: 't' }, shell, { type: 'turn.completed', turnId: 't', reason: 'end_turn' }]).status).toBe('completed')
+  })
+
+  it('pauses when the process exits under working subagents', () => {
+    const s = run([{ type: 'turn.started', turnId: 't' }, agents('running'), { type: 'turn.completed', turnId: 't', reason: 'end_turn' }, { type: 'session.exited', code: 0 }])
+    expect(s.status).toBe('paused')
+    expect(s.agents).toBe(0)
+  })
 })

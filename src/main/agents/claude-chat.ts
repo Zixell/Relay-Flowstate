@@ -354,6 +354,8 @@ class ClaudeSession implements AgentSession {
         allowDangerouslySkipPermissions: true,
         includePartialMessages: true,
         promptSuggestions: true,
+        // A one-line "what it is doing" for each subagent card
+        agentProgressSummaries: true,
         settings: flagSettings(this.ctx.sessionSettings),
         // Behave like the user's own CLI: CLAUDE.md, settings, custom commands.
         settingSources: ['user', 'project', 'local'],
@@ -422,6 +424,21 @@ class ClaudeSession implements AgentSession {
             command: tool ? str(tool.input.command) : undefined,
             description: msg.description
           })
+        } else if (msg.subtype === 'task_progress') {
+          // A subagent at work: its card shows what it is doing
+          const toolCallId = msg.tool_use_id ?? this.taskInfo.get(msg.task_id)?.toolCallId
+          const call = toolCallId ? this.tools.get(toolCallId) : undefined
+          if (toolCallId && (this.backgroundAgents.has(toolCallId) || (call && toolKind(call.name) === 'task'))) {
+            this.emit({
+              type: 'tool.updated',
+              toolCallId,
+              progress: {
+                toolUses: msg.usage.tool_uses,
+                durationMs: msg.usage.duration_ms,
+                activity: msg.summary || msg.last_tool_name
+              }
+            })
+          }
         } else if (msg.subtype === 'background_tasks_changed') {
           // The full set of live background tasks: replace, do not merge
           this.running = msg.tasks
@@ -439,6 +456,12 @@ class ClaudeSession implements AgentSession {
             })
           this.emitBackground()
         } else if (msg.subtype === 'task_notification' && !msg.ambient) {
+          // A subagent launched in the background has finished: its card gets the result
+          const toolCallId = msg.tool_use_id ?? this.taskInfo.get(msg.task_id)?.toolCallId
+          if (toolCallId && this.backgroundAgents.delete(toolCallId)) {
+            if (msg.usage) this.emit({ type: 'tool.updated', toolCallId, progress: { toolUses: msg.usage.tool_uses, durationMs: msg.usage.duration_ms, activity: undefined } })
+            this.emit({ type: 'tool.completed', toolCallId, status: msg.status === 'completed' ? 'ok' : 'error', output: msg.summary || msg.status })
+          }
           const was = this.running.find((t) => t.id === msg.task_id)
           // Foreground tasks also report their end; only background ones are listed
           if (was) {
@@ -505,11 +528,20 @@ class ClaudeSession implements AgentSession {
           if (block.type !== 'tool_result') continue
           const tool = this.tools.get(block.tool_use_id)
           const failed = Boolean(block.is_error)
+          const output = toolResultText(block.content)
+          // The Agent call returns as soon as a background subagent is launched; its card
+          // stays running until the subagent reports back (task_notification).
+          if (tool && toolKind(tool.name) === 'task' && !failed && /^Async agent launched/i.test(output ?? '')) {
+            this.backgroundAgents.add(block.tool_use_id)
+            this.emit({ type: 'tool.updated', toolCallId: block.tool_use_id, progress: { background: true } })
+            this.tools.delete(block.tool_use_id)
+            continue
+          }
           this.emit({
             type: 'tool.completed',
             toolCallId: block.tool_use_id,
             status: failed ? 'error' : 'ok',
-            output: toolResultText(block.content),
+            output,
             diff: tool && !failed ? toolDiff(tool.name, tool.input) : undefined
           })
           this.tools.delete(block.tool_use_id)
@@ -582,6 +614,8 @@ class ClaudeSession implements AgentSession {
   private limits = new Map<string, RateLimitInfo>()
   /** What task_started said about each task, for the background list. */
   private taskInfo = new Map<string, { toolCallId?: string; command?: string; description: string }>()
+  /** Agent calls whose subagent runs in the background: their cards wait for task_notification. */
+  private backgroundAgents = new Set<string>()
   private running: BackgroundTask[] = []
   private ended: BackgroundTask[] = []
 

@@ -270,6 +270,8 @@ export interface ToolCallContent {
   input: Record<string, unknown>
   output?: string
   diff?: FileDiff[]
+  /** A subagent's progress, see `SubagentProgress` in main/agents/adapter.ts. */
+  progress?: { background?: boolean; toolUses?: number; activity?: string; durationMs?: number }
 }
 
 /** A multiple-choice question from the agent, mirrors `AgentQuestion` in the main process. */

@@ -22,6 +22,7 @@ import {
   updateMessage,
   getMessage,
   getMessageByToolCall,
+  failRunningTools,
   getMessages,
   getTaskSummaries,
   appendTaskSummary,
@@ -229,6 +230,7 @@ export function persistEvent(taskId: string, turnId: string | null, e: AgentEven
       if (e.title) content.title = e.title
       if (e.input !== undefined) content.input = e.input
       if (e.diff) content.diff = e.diff
+      if (e.progress) content.progress = { ...content.progress, ...e.progress }
       return updateMessage(row.id, { content: JSON.stringify(content) })
     }
 
@@ -336,6 +338,7 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'session.exited':
       setStatus(s, reduceStatus(s.status, e))
+      failRunningTools(taskId)
       s.unsubscribe()
       live.delete(taskId)
       emitToRenderer(taskId, { event: e })
@@ -361,7 +364,8 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   completeTurn(e.turnId, { status, commit_after: after, usage_json: e.usage ? JSON.stringify(e.usage) : undefined, checkpoint: e.checkpoint })
 
   const changed = turn?.commit_before && after ? diffSnapshotFiles(s.cwd, turn.commit_before, after) : []
-  if (e.reason !== 'interrupted') {
+  // With subagents still working the turn only handed off; their own report finishes the task.
+  if (e.reason !== 'interrupted' && !(e.reason !== 'error' && s.status.agents > 0)) {
     const title = loadTask(taskId).title
     notifyTask(
       taskId,
@@ -671,7 +675,9 @@ export async function disposeSession(taskId: string): Promise<void> {
  * credentials; each resumes its conversation with the next message.
  */
 export async function restartIdleSessions(agentId: string): Promise<void> {
-  const idle = [...live.values()].filter((s) => !s.status.inTurn && (getTaskById(s.taskId) as TaskRow | null)?.process_type === agentId)
+  const idle = [...live.values()].filter(
+    (s) => !s.status.inTurn && s.status.agents === 0 && (getTaskById(s.taskId) as TaskRow | null)?.process_type === agentId
+  )
   await Promise.all(idle.map((s) => disposeSession(s.taskId)))
 }
 

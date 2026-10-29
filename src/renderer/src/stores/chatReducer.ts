@@ -95,8 +95,15 @@ export function applyChatEvent(state: ChatState, { event, message }: ChatEventPa
         costUsd: event.usage?.costUsd ?? next.costUsd
       }
     case 'session.exited':
-      // Background work dies with the agent's process
-      return { ...next, inTurn: false, streaming: {}, streamingOrder: [], background: [] }
+      // Background work dies with the agent's process, subagents included
+      return {
+        ...next,
+        inTurn: false,
+        streaming: {},
+        streamingOrder: [],
+        background: [],
+        messages: next.messages.map((m) => (m.kind === 'tool_call' && m.tool_status === 'running' ? { ...m, tool_status: 'error' } : m))
+      }
     default:
       return next
   }

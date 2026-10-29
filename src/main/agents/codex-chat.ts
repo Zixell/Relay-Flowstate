@@ -104,6 +104,47 @@ interface Item {
   path?: string
   contentItems?: unknown[] | null
   success?: boolean | null
+  // subAgentActivity
+  kind?: 'started' | 'interacted' | 'interrupted' | 'completed'
+  agentThreadId?: string
+  agentPath?: string
+  model?: string | null
+  // collabAgentToolCall
+  receiverThreadIds?: string[]
+  prompt?: string | null
+}
+
+/** A subagent Codex spawned: a thread of its own, shown as a `task` card in the parent chat. */
+interface Subagent {
+  threadId: string
+  toolCallId: string
+  /** From its path, e.g. "count_root". */
+  name: string
+  /** Its role or nickname, when Codex gives one. */
+  label?: string
+  description: string
+  status: 'running' | 'completed' | 'failed' | 'stopped'
+  turnId?: string
+  toolUses: number
+  /** Its last reply: the result once it finishes. */
+  lastText?: string
+  startedAt: number
+}
+
+/** "/root/agent_1" → "agent_1" */
+function agentName(path: string | undefined, threadId: string): string {
+  return path?.split('/').filter(Boolean).pop() || `agent ${threadId.slice(-4)}`
+}
+
+const COLLAB_VERBS: Record<string, string> = {
+  wait: 'Wait for',
+  sendInput: 'Send to',
+  sendMessage: 'Send to',
+  followupTask: 'Follow up with',
+  resumeAgent: 'Resume',
+  interruptAgent: 'Interrupt',
+  closeAgent: 'Close',
+  listAgents: 'List agents'
 }
 
 interface PendingApproval {
@@ -216,6 +257,8 @@ class CodexSession implements AgentSession {
   private usageAtTurnStart: TokenBreakdown = { inputTokens: 0, outputTokens: 0 }
   private approvals = new Map<string, PendingApproval>()
   private itemTitles = new Map<string, string>()
+  /** Spawned subagents by thread id; their own events arrive with that thread id. */
+  private subagents = new Map<string, Subagent>()
   private writableRoots: string[]
   private disposed = false
   private rel: (p: string) => string
@@ -306,6 +349,8 @@ class CodexSession implements AgentSession {
   // --- Agent → us -----------------------------------------------------------
 
   private onNotification(method: string, p: Record<string, unknown>): void {
+    const child = typeof p.threadId === 'string' ? this.subagents.get(p.threadId) : undefined
+    if (child) return this.onSubagentNotification(child, method, p)
     if (p.threadId && p.threadId !== this.threadId) return
     switch (method) {
       case 'turn/started': {
@@ -420,9 +465,143 @@ class CodexSession implements AgentSession {
       case 'webSearch':
         this.emit({ type: 'tool.started', toolCallId: item.id, kind: 'fetch', name: 'web_search', title: item.query || 'Web search', input: {} })
         return
+      case 'subAgentActivity':
+        this.subagentActivity(item)
+        return
+      case 'collabAgentToolCall': {
+        // Spawning shows as the subagent's own card (subAgentActivity)
+        if (item.tool === 'spawnAgent') return
+        const names = (item.receiverThreadIds ?? []).map((id) => this.subagents.get(id)?.name ?? agentName(undefined, id))
+        const verb = COLLAB_VERBS[item.tool ?? ''] ?? String(item.tool)
+        const title = item.tool === 'listAgents' ? verb : `${verb} ${names.length ? names.join(', ') : 'agents'}`
+        this.emit({ type: 'tool.started', toolCallId: item.id, kind: 'other', name: String(item.tool), title, input: item.prompt ? { prompt: item.prompt } : {} })
+        return
+      }
       default:
         return
     }
+  }
+
+  // --- Subagents --------------------------------------------------------------
+
+  private subagentActivity(item: Item): void {
+    const threadId = item.agentThreadId
+    if (!threadId) return
+    let agent = this.subagents.get(threadId)
+    if (item.kind === 'started' && !agent) {
+      const name = agentName(item.agentPath, threadId)
+      agent = { threadId, toolCallId: `subagent:${threadId}`, name, description: '', status: 'running', toolUses: 0, startedAt: Date.now() }
+      this.subagents.set(threadId, agent)
+      this.emit({
+        type: 'tool.started',
+        toolCallId: agent.toolCallId,
+        kind: 'task',
+        name: 'spawn_agent',
+        title: name,
+        input: { subagent_type: name, ...(item.model ? { model: item.model } : {}) }
+      })
+      this.emitSubagents()
+      void this.describeSubagent(agent)
+    } else if (agent && (item.kind === 'completed' || item.kind === 'interrupted')) {
+      this.finishSubagent(agent, item.kind === 'completed' ? 'completed' : 'stopped')
+    }
+  }
+
+  /** Its nickname, role and task, which only the thread itself carries. */
+  private async describeSubagent(agent: Subagent): Promise<void> {
+    const r = await this.rpc
+      ?.request<{ thread: { preview?: string; agentNickname?: string | null; agentRole?: string | null } }>('thread/read', {
+        threadId: agent.threadId,
+        includeTurns: false
+      })
+      .catch(() => null)
+    if (!r || this.disposed) return
+    const { preview, agentNickname, agentRole } = r.thread
+    // The path name says what it is for ("count_root"); the nickname ("Harvey") just who
+    if (preview) agent.description = preview.split('\n')[0].slice(0, 200)
+    agent.label = agentRole || agentNickname || undefined
+    this.emit({
+      type: 'tool.updated',
+      toolCallId: agent.toolCallId,
+      title: agent.description || agent.name,
+      input: { subagent_type: agent.label ?? agent.name, description: agent.description || agent.name, prompt: preview || undefined }
+    })
+    this.emitSubagents()
+  }
+
+  private onSubagentNotification(agent: Subagent, method: string, p: Record<string, unknown>): void {
+    switch (method) {
+      case 'turn/started':
+        agent.turnId = (p.turn as { id: string }).id
+        if (agent.status !== 'running') {
+          agent.status = 'running'
+          this.emitSubagents()
+        }
+        return
+      case 'item/started': {
+        const item = p.item as Item
+        const activity =
+          item.type === 'commandExecution'
+            ? stripShell(item.command ?? '')
+            : item.type === 'fileChange'
+              ? `Editing ${(item.changes ?? []).map((c) => this.rel(c.path)).join(', ')}`
+              : item.type === 'mcpToolCall'
+                ? `${item.server} · ${item.tool}`
+                : item.type === 'webSearch'
+                  ? 'Searching the web'
+                  : undefined
+        if (!activity) return
+        agent.toolUses++
+        this.emit({ type: 'tool.updated', toolCallId: agent.toolCallId, progress: { toolUses: agent.toolUses, activity, durationMs: Date.now() - agent.startedAt } })
+        return
+      }
+      case 'item/completed': {
+        const item = p.item as Item
+        if (item.type === 'agentMessage' && item.text?.trim()) agent.lastText = item.text
+        return
+      }
+      case 'turn/completed': {
+        const turn = p.turn as { status?: string; error?: { message?: string } | null }
+        this.finishSubagent(agent, turn.status === 'failed' ? 'failed' : turn.status === 'interrupted' ? 'stopped' : 'completed', turn.error?.message)
+        return
+      }
+      default:
+        return
+    }
+  }
+
+  private finishSubagent(agent: Subagent, status: Subagent['status'], error?: string): void {
+    if (agent.status !== 'running') return
+    agent.status = status
+    this.emit({ type: 'tool.updated', toolCallId: agent.toolCallId, progress: { toolUses: agent.toolUses, durationMs: Date.now() - agent.startedAt, activity: undefined } })
+    this.emit({
+      type: 'tool.completed',
+      toolCallId: agent.toolCallId,
+      status: status === 'completed' ? 'ok' : 'error',
+      output: agent.lastText ?? error ?? (status === 'stopped' ? 'Stopped' : undefined)
+    })
+    this.emitSubagents()
+  }
+
+  /** Subagents go on the background list too: the task counts as working while they run. */
+  private emitSubagents(): void {
+    this.emit({
+      type: 'background.updated',
+      tasks: [...this.subagents.values()].map((a) => ({
+        id: a.threadId,
+        type: `agent · ${a.label ?? a.name}`,
+        description: a.description || a.name,
+        toolCallId: a.toolCallId,
+        status: a.status,
+        summary: a.status === 'running' ? undefined : a.lastText?.split('\n')[0].slice(0, 200)
+      }))
+    })
+  }
+
+  async stopBackgroundTask(threadId: string): Promise<void> {
+    const agent = this.subagents.get(threadId)
+    if (!agent?.turnId || agent.status !== 'running') return
+    await this.rpc?.request('turn/interrupt', { threadId, turnId: agent.turnId })
   }
 
   private itemCompleted(item: Item): void {
@@ -467,6 +646,13 @@ class CodexSession implements AgentSession {
         return
       case 'webSearch':
         this.emit({ type: 'tool.completed', toolCallId: item.id, status: 'ok' })
+        return
+      case 'subAgentActivity':
+        this.subagentActivity(item)
+        return
+      case 'collabAgentToolCall':
+        if (item.tool === 'spawnAgent') return
+        this.emit({ type: 'tool.completed', toolCallId: item.id, status: item.status === 'failed' ? 'error' : 'ok' })
         return
       default:
         return

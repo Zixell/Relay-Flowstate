@@ -19,6 +19,7 @@ import {
 import { diffLines } from 'diff'
 import { cn } from '../../lib/utils'
 import type { ChatMessage, FileDiff, ToolCallContent, ToolKind } from '../../types'
+import { SubagentCard } from './SubagentCard'
 
 const ICONS: Record<ToolKind, React.ComponentType<{ className?: string }>> = {
   read: FileText,
@@ -122,12 +123,29 @@ export const ToolCallCard = memo(function ToolCallCard({
 }) {
   const tool = useMemo<ToolCallContent>(() => {
     try {
-      return JSON.parse(message.content ?? '{}')
+      const parsed = JSON.parse(message.content ?? '{}')
+      return { ...parsed, input: parsed.input ?? {} }
     } catch {
       return { kind: 'other', name: 'tool', title: 'tool', input: {} }
     }
   }, [message.content])
 
+  return tool.kind === 'task' ? (
+    <SubagentCard message={message} tool={tool} onBackground={onBackground} />
+  ) : (
+    <PlainToolCard message={message} tool={tool} onBackground={onBackground} />
+  )
+})
+
+function PlainToolCard({
+  message,
+  tool,
+  onBackground
+}: {
+  message: ChatMessage
+  tool: ToolCallContent
+  onBackground?: () => Promise<unknown>
+}) {
   const status = message.tool_status
   const hasDiff = Boolean(tool.diff?.length)
   // Edits are what the user most wants to see, so they start open.
@@ -203,4 +221,4 @@ export const ToolCallCard = memo(function ToolCallCard({
       )}
     </div>
   )
-})
+}

@@ -447,6 +447,12 @@ export function getTurnsRuntimeSeconds(taskId: string): number {
   return row.s
 }
 
+/** The task's agent process is gone: tool calls it left running (subagents) cannot finish anymore. */
+export function failRunningTools(taskId: string): void {
+  if (!db) return
+  db.prepare(`UPDATE messages SET tool_status = 'error' WHERE task_id = ? AND kind = 'tool_call' AND tool_status = 'running'`).run(taskId)
+}
+
 /** On app start, turns cannot still be in flight. */
 export function resetRunningTurns(): void {
   if (!db) return

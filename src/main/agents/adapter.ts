@@ -56,6 +56,18 @@ export interface AgentQuestion {
   options: { label: string; description?: string }[]
 }
 
+/**
+ * Where a subagent (a `task` tool call) stands while it works. `background`:
+ * the call returned at once and the agent runs on after the turn.
+ */
+export interface SubagentProgress {
+  background?: boolean
+  toolUses?: number
+  /** What it is doing right now, e.g. "Bash" or a command. */
+  activity?: string
+  durationMs?: number
+}
+
 /** Work the agent left running in the background: a shell command, a subagent, a monitor. */
 export interface BackgroundTask {
   id: string
@@ -124,8 +136,8 @@ export type AgentEvent =
   | { type: 'thinking'; messageId: string; text: string }
   | { type: 'tool.started'; toolCallId: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: 'tool.completed'; toolCallId: string; status: 'ok' | 'error'; output?: string; diff?: FileDiff[] }
-  /** Details that arrive after the call started (ACP agents refine title and arguments). */
-  | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[] }
+  /** Details that arrive after the call started (ACP agents refine title and arguments; a subagent reports progress). */
+  | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[]; progress?: SubagentProgress }
   /** With `questions`, the prompt is a set of choices; it is answered through respondPermission's `answers`. */
   | {
       type: 'permission.requested'

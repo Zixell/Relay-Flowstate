@@ -286,13 +286,23 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
   const running = tasks.filter((t) => t.status === 'running').length
   const signature = tasks.map((t) => `${t.id}:${t.status}`).join(',')
   if (!tasks.length || (!running && dismissed === signature)) return null
+  const isAgent = (t: BackgroundTask): boolean => t.type.startsWith('agent')
+  const onlyAgents = tasks.every(isAgent)
+  const agentsRunning = tasks.filter((t) => isAgent(t) && t.status === 'running').length
   return (
-    <div className="rounded-xl border border-white/[0.06] bg-[#0f0f0f] mb-3">
+    <div className={cn('rounded-xl border mb-3', agentsRunning ? 'border-violet-400/20 bg-violet-500/[0.03]' : 'border-white/[0.06] bg-[#0f0f0f]')}>
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-400">
         <ChevronRight className={cn('w-3 h-3 transition-transform', open && 'rotate-90')} />
-        Background
+        {onlyAgents ? (
+          <span className="flex items-center gap-1.5 text-violet-300">
+            <Bot className="w-3.5 h-3.5" />
+            Subagents
+          </span>
+        ) : (
+          'Background'
+        )}
         <span className="text-zinc-600">{running ? `${running} running` : 'done'}</span>
-        {running > 0 && <Loader2 className="w-3 h-3 animate-spin text-zinc-600" />}
+        {running > 0 && <Loader2 className={cn('w-3 h-3 animate-spin', agentsRunning ? 'text-violet-400/70' : 'text-zinc-600')} />}
         {!running && (
           <span
             role="button"
@@ -310,12 +320,19 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
       {open && (
         <ul className="px-3 pb-2.5 space-y-1.5">
           {tasks.map((t) => {
-            const Icon = t.type === 'shell' ? TerminalSquare : t.type.startsWith('agent') ? Bot : Activity
+            const agent = isAgent(t)
+            const Icon = t.type === 'shell' ? TerminalSquare : agent ? Bot : Activity
             const label = t.command ?? t.description
+            // An agent row leads to its card in the chat
+            const card = agent && t.toolCallId ? () => document.querySelector(`[data-tool-call="${CSS.escape(t.toolCallId!)}"]`) : null
             return (
-              <li key={t.id} className="flex items-start gap-2 text-[12px]">
+              <li
+                key={t.id}
+                onClick={card ? () => card()?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+                className={cn('flex items-start gap-2 text-[12px]', card && 'cursor-pointer rounded-md -mx-1.5 px-1.5 py-0.5 hover:bg-white/[0.03]')}
+              >
                 {t.status === 'running' ? (
-                  <Icon className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
+                  <Icon className={cn('w-3.5 h-3.5 mt-0.5 shrink-0', agent ? 'text-violet-400' : 'text-blue-400')} />
                 ) : t.status === 'completed' ? (
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/80 mt-0.5 shrink-0" />
                 ) : (
@@ -326,7 +343,11 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
                     {label}
                   </div>
                   <div className="text-[11px] text-zinc-600 truncate" title={t.summary}>
-                    {t.type}
+                    {agent ? (
+                      <span className="font-mono px-1 rounded bg-white/[0.05] text-zinc-400">{t.type.replace(/^agent( · )?/, '') || 'agent'}</span>
+                    ) : (
+                      t.type
+                    )}
                     {t.status !== 'running' && ` · ${t.status}`}
                     {t.summary && ` · ${t.summary}`}
                   </div>
@@ -334,7 +355,8 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
                 {t.status === 'running' && (
                   <button
                     disabled={stopping.has(t.id)}
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation()
                       setStopping((s) => new Set(s).add(t.id))
                       await window.api.chat.stopBackground(taskId, t.id).catch(() =>
                         setStopping((s) => {
@@ -612,7 +634,9 @@ export function ChatView({ task, compact }: Props) {
             const i = j + windowStart
             return (
             <React.Fragment key={m.id}>
-              <div className={cn('chat-item', i > windowStart && spacing(m, state.messages[i - 1]))}>{renderMessage(m)}</div>
+              <div className={cn('chat-item', i > windowStart && spacing(m, state.messages[i - 1]))} data-tool-call={m.tool_call_id ?? undefined}>
+                {renderMessage(m)}
+              </div>
               {turnEnds.has(i) && (
                 <div className="mt-2">
                   <TurnFooter
