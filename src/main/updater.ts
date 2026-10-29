@@ -1,8 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
-import { createWriteStream } from 'fs'
+import { createHash } from 'crypto'
+import { open, rename, rm } from 'fs/promises'
 import { join } from 'path'
-import { Readable } from 'stream'
-import { pipeline } from 'stream/promises'
 
 /**
  * Updates from the GitHub releases.
@@ -35,7 +34,7 @@ export interface UpdateState {
 const mode: UpdateState['mode'] = !app.isPackaged ? 'page' : process.platform === 'win32' ? 'install' : process.platform === 'darwin' ? 'open' : 'page'
 let state: UpdateState = { status: 'idle', current: app.getVersion(), mode }
 /** The .dmg of this Mac's architecture in the latest release. */
-let dmg: { url: string; name: string } | null = null
+let dmg: { url: string; name: string; size: number; sha256?: string } | null = null
 let downloadedDmg: string | null = null
 
 function set(next: Partial<UpdateState>): void {
@@ -91,14 +90,20 @@ export async function checkForUpdates(): Promise<UpdateState> {
       headers: { Accept: 'application/vnd.github+json' }
     })
     if (!res.ok) throw new Error(`GitHub answered ${res.status}`)
-    const release = (await res.json()) as { tag_name: string; html_url: string; assets: { name: string; browser_download_url: string }[] }
+    const release = (await res.json()) as {
+      tag_name: string
+      html_url: string
+      assets: { name: string; browser_download_url: string; size: number; digest?: string | null }[]
+    }
     const version = release.tag_name.replace(/^v/, '')
     if (!isNewer(version, state.current)) {
       set({ status: 'up-to-date', version: undefined, notesUrl: undefined })
       return state
     }
     const asset = release.assets.find((a) => a.name.endsWith(`-mac-${process.arch}.dmg`))
-    dmg = asset ? { url: asset.browser_download_url, name: asset.name } : null
+    dmg = asset
+      ? { url: asset.browser_download_url, name: asset.name, size: asset.size, sha256: asset.digest?.replace(/^sha256:/, '') }
+      : null
     // Already downloaded this session: nothing more to fetch
     if (state.status === 'ready' && state.version === version) return state
     set({ status: 'available', version, notesUrl: release.html_url, progress: undefined })
@@ -130,22 +135,64 @@ export async function downloadUpdate(): Promise<void> {
       return
     }
     if (!dmg) throw new Error(`The release has no installer for this Mac (${process.arch})`)
-    const res = await fetch(dmg.url)
-    if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`)
-    const total = Number(res.headers.get('content-length')) || 0
-    let received = 0
     const target = join(app.getPath('downloads'), dmg.name)
-    const counted = Readable.fromWeb(res.body as import('stream/web').ReadableStream<Uint8Array>)
-    counted.on('data', (chunk: Buffer) => {
-      received += chunk.length
-      if (total) set({ progress: Math.round((received / total) * 100) })
-    })
-    await pipeline(counted, createWriteStream(target))
+    // A damaged image fails in Finder with error -36 halfway through the copy; never open one
+    let failure = ''
+    for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+      failure = await downloadDmg(dmg, target)
+      if (!failure) break
+      console.warn(`[relay] update download attempt ${attempt} failed: ${failure}`)
+    }
+    if (failure) throw new Error(`The download was damaged (${failure}). Try again, or download it from the release page.`)
     downloadedDmg = target
     set({ status: 'ready', progress: 100 })
   } catch (err) {
     set({ status: 'error', error: describeUpdateError(err) })
   }
+}
+
+const MAX_DOWNLOAD_ATTEMPTS = 3
+
+/**
+ * Downloads the .dmg into `target` and checks it against the size and SHA-256
+ * GitHub lists for it. Returns what was wrong, or '' when it is intact.
+ *
+ * Images the app downloaded were sometimes damaged — right size, wrong bytes
+ * in places — while a browser download of the same file was fine. So every
+ * chunk is copied and written in order, one at a time, into a `.part` file
+ * that becomes the .dmg only once its checksum matches.
+ */
+async function downloadDmg(asset: NonNullable<typeof dmg>, target: string): Promise<string> {
+  const partial = `${target}.part`
+  const res = await fetch(asset.url)
+  if (!res.ok || !res.body) return `HTTP ${res.status}`
+  const total = Number(res.headers.get('content-length')) || asset.size
+  const hash = createHash('sha256')
+  const file = await open(partial, 'w')
+  let received = 0
+  let shown = -1
+  try {
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      const copy = Buffer.from(chunk)
+      hash.update(copy)
+      await file.write(copy)
+      received += copy.length
+      const progress = Math.floor((received / total) * 100)
+      if (progress !== shown) set({ progress: (shown = progress) })
+    }
+  } finally {
+    await file.close()
+  }
+  const sha256 = hash.digest('hex')
+  const problem =
+    received !== asset.size ? `${received} of ${asset.size} bytes` : asset.sha256 && sha256 !== asset.sha256 ? 'checksum mismatch' : ''
+  if (problem) {
+    await rm(partial, { force: true })
+    return problem
+  }
+  await rm(target, { force: true })
+  await rename(partial, target)
+  return ''
 }
 
 /** Windows: quits and runs the installer. macOS: opens the .dmg and quits, so the app can be replaced. */
