@@ -231,7 +231,7 @@ export function persistEvent(taskId: string, turnId: string | null, e: AgentEven
       if (e.input !== undefined) content.input = e.input
       if (e.diff) content.diff = e.diff
       if (e.progress) content.progress = { ...content.progress, ...e.progress }
-      return updateMessage(row.id, { content: JSON.stringify(content) })
+      return updateMessage(row.id, { content: JSON.stringify(content), ...(e.running ? { tool_status: 'running' } : {}) })
     }
 
     case 'permission.requested':

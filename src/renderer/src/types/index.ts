@@ -84,6 +84,8 @@ export interface BackgroundTask {
   toolCallId?: string
   status: 'running' | 'completed' | 'failed' | 'stopped'
   summary?: string
+  /** The subagent task that started it. */
+  parentId?: string
 }
 
 export interface Project {

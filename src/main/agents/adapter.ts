@@ -81,6 +81,8 @@ export interface BackgroundTask {
   status: 'running' | 'completed' | 'failed' | 'stopped'
   /** What it came to, once it ended. */
   summary?: string
+  /** The subagent task that started it; shown under that agent. */
+  parentId?: string
 }
 
 /** A setting of the agent's session that can be changed from the chat — the app's `/config`. */
@@ -137,7 +139,8 @@ export type AgentEvent =
   | { type: 'tool.started'; toolCallId: string; kind: ToolKind; name: string; title: string; input: unknown }
   | { type: 'tool.completed'; toolCallId: string; status: 'ok' | 'error'; output?: string; diff?: FileDiff[] }
   /** Details that arrive after the call started (ACP agents refine title and arguments; a subagent reports progress). */
-  | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[]; progress?: SubagentProgress }
+  /** `running`: a finished call is at work again (a subagent resumed by its own background work). */
+  | { type: 'tool.updated'; toolCallId: string; kind?: ToolKind; title?: string; input?: unknown; diff?: FileDiff[]; progress?: SubagentProgress; running?: boolean }
   /** With `questions`, the prompt is a set of choices; it is answered through respondPermission's `answers`. */
   | {
       type: 'permission.requested'

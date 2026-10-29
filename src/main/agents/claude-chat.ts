@@ -287,8 +287,36 @@ export function taskKind(raw: string | undefined): string {
   return raw.replace(/^local_/, '')
 }
 
+/** A subagent's notice that it stopped only to wait on its own background work. */
+export function isInterimAgentNotice(summary: string | undefined): boolean {
+  return Boolean(summary && /has not reported yet|waiting on its own background work/i.test(summary))
+}
+
+/** A notice whose summary only says the report came as a separate message. */
+export function isHandbackPointer(summary: string | undefined): boolean {
+  return Boolean(summary && /report was delivered to you as a message/i.test(summary))
+}
+
+/**
+ * The report inside a subagent's hand-back: the harness frames it with a
+ * preamble ending in "The report follows:" and indents every line of it.
+ */
+export function handbackReport(body: string): string {
+  const marker = body.search(/The report follows:\s*\n/)
+  const rest = marker >= 0 ? body.slice(marker).replace(/^The report follows:\s*\n/, '') : body
+  const lines = rest.split('\n')
+  const indented = lines.filter((l) => l.trim()).every((l) => l.startsWith('  '))
+  return (indented ? lines.map((l) => l.slice(2)) : lines).join('\n').trim()
+}
+
+function firstLine(text: string): string {
+  return text.split('\n').find((l) => l.trim())?.trim().slice(0, 200) ?? ''
+}
+
 /** Ended background tasks kept on the list, newest last. */
 const MAX_ENDED_TASKS = 5
+/** Ended tasks of subagents kept on the list, under their agents. */
+const MAX_ENDED_CHILD_TASKS = 20
 
 /** The questions of an AskUserQuestion call, or undefined when the input does not look like one. */
 export function toQuestions(input: Record<string, unknown>): AgentQuestion[] | undefined {
@@ -445,30 +473,35 @@ class ClaudeSession implements AgentSession {
             .filter((t) => !t.ambient)
             .map((t) => {
               const info = this.taskInfo.get(t.task_id)
+              const toolCallId = info?.toolCallId ?? (this.agentTasks.get(t.task_id) || undefined)
+              if (t.subagent_type) this.agentResumed(t.task_id)
               return {
                 id: t.task_id,
                 type: t.subagent_type ? `agent · ${t.subagent_type}` : taskKind(t.task_type),
                 description: t.description || info?.description || '',
                 command: info?.command,
-                toolCallId: info?.toolCallId,
-                status: 'running' as const
+                toolCallId,
+                status: 'running' as const,
+                // A subagent's own shells and monitors are listed under it
+                parentId: t.parent_task_id
               }
             })
           this.emitBackground()
         } else if (msg.subtype === 'task_notification' && !msg.ambient) {
-          // A subagent launched in the background has finished: its card gets the result
+          // A subagent that stopped to wait on its own background work is not done yet
+          if (isInterimAgentNotice(msg.summary)) return
           const toolCallId = msg.tool_use_id ?? this.taskInfo.get(msg.task_id)?.toolCallId
+          // Its report may have come as a hand-back message; the notice then only points at it
+          const report = this.agentReports.get(msg.task_id) ?? (isHandbackPointer(msg.summary) ? undefined : msg.summary || undefined)
           if (toolCallId && this.backgroundAgents.delete(toolCallId)) {
             if (msg.usage) this.emit({ type: 'tool.updated', toolCallId, progress: { toolUses: msg.usage.tool_uses, durationMs: msg.usage.duration_ms, activity: undefined } })
-            this.emit({ type: 'tool.completed', toolCallId, status: msg.status === 'completed' ? 'ok' : 'error', output: msg.summary || msg.status })
+            this.emit({ type: 'tool.completed', toolCallId, status: msg.status === 'completed' ? 'ok' : 'error', output: report ?? msg.status })
           }
           const was = this.running.find((t) => t.id === msg.task_id)
           // Foreground tasks also report their end; only background ones are listed
-          if (was) {
-            this.running = this.running.filter((t) => t.id !== msg.task_id)
-            this.ended = [...this.ended, { ...was, status: msg.status, summary: msg.summary || undefined }].slice(-MAX_ENDED_TASKS)
-            this.emitBackground()
-          }
+          if (was) this.endBackground(was, msg.status, report)
+          this.agentTasks.set(msg.task_id, toolCallId ?? '')
+          this.agentEndedAt.set(msg.task_id, Date.now())
           this.taskInfo.delete(msg.task_id)
         }
         return
@@ -523,6 +556,12 @@ class ClaudeSession implements AgentSession {
       }
 
       case 'user': {
+        // A background subagent's final report, handed back as a message to this session
+        if (msg.origin?.kind === 'peer' && msg.origin.senderTaskId && msg.origin.body) {
+          // Other messages from a subagent along the way are not its result
+          if (/\[Subagent hand-back\]/.test(msg.origin.body)) this.agentHandback(msg.origin.senderTaskId, msg.origin.body)
+          return
+        }
         if (msg.parent_tool_use_id || typeof msg.message.content === 'string') return
         for (const block of msg.message.content) {
           if (block.type !== 'tool_result') continue
@@ -616,11 +655,60 @@ class ClaudeSession implements AgentSession {
   private taskInfo = new Map<string, { toolCallId?: string; command?: string; description: string }>()
   /** Agent calls whose subagent runs in the background: their cards wait for task_notification. */
   private backgroundAgents = new Set<string>()
+  /** Reports subagents handed back as messages, by task id. */
+  private agentReports = new Map<string, string>()
+  /** Agent card of each task that already ended, for a report that comes after its notice. */
+  private agentTasks = new Map<string, string>()
+
+  private agentEndedAt = new Map<string, number>()
+
+  /**
+   * A subagent that ended while its own background work ran is woken up when
+   * that work finishes: its card is running again until the next report.
+   */
+  private agentResumed(taskId: string): void {
+    const toolCallId = this.agentTasks.get(taskId)
+    const endedAt = this.agentEndedAt.get(taskId)
+    // The set of live tasks may still list it right after its notice
+    if (!toolCallId || endedAt === undefined || Date.now() - endedAt < 1500 || this.backgroundAgents.has(toolCallId)) return
+    this.agentEndedAt.delete(taskId)
+    this.agentReports.delete(taskId)
+    this.backgroundAgents.add(toolCallId)
+    this.taskInfo.set(taskId, { toolCallId, description: '' })
+    this.emit({ type: 'tool.updated', toolCallId, running: true, progress: { background: true, activity: 'Resumed' } })
+  }
+
+  private agentHandback(taskId: string, body: string): void {
+    const report = handbackReport(body)
+    this.agentReports.set(taskId, report)
+    const toolCallId = this.taskInfo.get(taskId)?.toolCallId ?? this.agentTasks.get(taskId)
+    if (toolCallId) {
+      this.backgroundAgents.delete(toolCallId)
+      this.emit({ type: 'tool.completed', toolCallId, status: 'ok', output: report })
+    }
+    const ended = this.ended.find((t) => t.id === taskId)
+    if (ended) {
+      ended.summary = firstLine(report)
+      this.emitBackground()
+    }
+  }
+
+  private endBackground(task: BackgroundTask, status: BackgroundTask['status'], summary?: string): void {
+    this.running = this.running.filter((t) => t.id !== task.id)
+    // A task can end more than once (a subagent resumed by a message): keep one row
+    const ended = [...this.ended.filter((t) => t.id !== task.id), { ...task, status, summary: summary ? firstLine(summary) : undefined }]
+    const own = ended.filter((t) => !t.parentId).slice(-MAX_ENDED_TASKS)
+    const children = ended.filter((t) => t.parentId).slice(-MAX_ENDED_CHILD_TASKS)
+    this.ended = ended.filter((t) => own.includes(t) || children.includes(t))
+    this.emitBackground()
+  }
   private running: BackgroundTask[] = []
   private ended: BackgroundTask[] = []
 
   private emitBackground(): void {
-    this.emit({ type: 'background.updated', tasks: [...this.running, ...this.ended] })
+    // A resumed subagent is running again, not also ended
+    const ended = this.ended.filter((e) => !this.running.some((r) => r.id === e.id))
+    this.emit({ type: 'background.updated', tasks: [...this.running, ...ended] })
   }
 
   /**

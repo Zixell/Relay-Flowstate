@@ -277,18 +277,94 @@ function PlanPanel({ items }: { items: PlanItem[] }) {
   )
 }
 
-/** Commands and subagents the agent left running, with a Stop for each. */
+/** Commands and subagents the agent left running, with a Stop for each; a subagent's own tasks sit under it. */
 function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundTask[] }) {
   const [open, setOpen] = useState(true)
   const [stopping, setStopping] = useState<Set<string>>(new Set())
   // The list that was closed with ×; it comes back once anything on it changes
   const [dismissed, setDismissed] = useState<string | null>(null)
-  const running = tasks.filter((t) => t.status === 'running').length
+  const ids = new Set(tasks.map((t) => t.id))
+  // A task whose agent is no longer listed stands on its own
+  const top = tasks.filter((t) => !t.parentId || !ids.has(t.parentId))
+  const childrenOf = (id: string): BackgroundTask[] => tasks.filter((t) => t.parentId === id)
+  const running = top.filter((t) => t.status === 'running').length
   const signature = tasks.map((t) => `${t.id}:${t.status}`).join(',')
   if (!tasks.length || (!running && dismissed === signature)) return null
   const isAgent = (t: BackgroundTask): boolean => t.type.startsWith('agent')
-  const onlyAgents = tasks.every(isAgent)
-  const agentsRunning = tasks.filter((t) => isAgent(t) && t.status === 'running').length
+  const onlyAgents = top.every(isAgent)
+  const agentsRunning = top.filter((t) => isAgent(t) && t.status === 'running').length
+
+  const stop = async (id: string): Promise<void> => {
+    setStopping((s) => new Set(s).add(id))
+    await window.api.chat.stopBackground(taskId, id).catch(() =>
+      setStopping((s) => {
+        const next = new Set(s)
+        next.delete(id)
+        return next
+      })
+    )
+  }
+
+  const row = (t: BackgroundTask, child: boolean): React.ReactNode => {
+    const agent = isAgent(t)
+    const Icon = t.type === 'shell' ? TerminalSquare : agent ? Bot : Activity
+    const label = t.command ?? t.description
+    // An agent row leads to its card in the chat
+    const card = agent && t.toolCallId ? () => document.querySelector(`[data-tool-call="${CSS.escape(t.toolCallId!)}"]`) : null
+    const size = child ? 'w-3 h-3' : 'w-3.5 h-3.5'
+    return (
+      <div
+        onClick={card ? () => card()?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
+        className={cn(
+          'flex items-start gap-2',
+          child ? 'text-[11.5px]' : 'text-[12px]',
+          card && 'cursor-pointer rounded-md -mx-1.5 px-1.5 py-0.5 hover:bg-white/[0.03]'
+        )}
+      >
+        {t.status === 'running' ? (
+          <Icon className={cn(size, 'mt-0.5 shrink-0', agent ? 'text-violet-400' : 'text-blue-400')} />
+        ) : t.status === 'completed' ? (
+          <CheckCircle2 className={cn(size, 'text-emerald-500/80 mt-0.5 shrink-0')} />
+        ) : (
+          <XCircle className={cn(size, 'text-zinc-500 mt-0.5 shrink-0')} />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className={cn('truncate', t.command && 'font-mono text-[11px]', t.status === 'running' ? 'text-zinc-200' : 'text-zinc-500')} title={label}>
+            {label}
+          </div>
+          {!(child && t.status === 'running') && (
+            <div className="text-[11px] text-zinc-600 truncate" title={t.summary}>
+              {agent ? (
+                <span className="font-mono px-1 rounded bg-white/[0.05] text-zinc-400">{t.type.replace(/^agent( · )?/, '') || 'agent'}</span>
+              ) : (
+                t.type
+              )}
+              {t.status !== 'running' && ` · ${t.status}`}
+              {t.summary && ` · ${t.summary}`}
+            </div>
+          )}
+        </div>
+        {t.status === 'running' && (
+          <button
+            disabled={stopping.has(t.id)}
+            onClick={(e) => {
+              e.stopPropagation()
+              void stop(t.id)
+            }}
+            title="Stop this task"
+            className={cn(
+              'shrink-0 flex items-center gap-1 rounded-md text-[11px] text-zinc-400 border border-white/[0.08] hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50',
+              child ? 'h-5 px-1.5' : 'h-6 px-2'
+            )}
+          >
+            {stopping.has(t.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-2.5 h-2.5" />}
+            Stop
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={cn('rounded-xl border mb-3', agentsRunning ? 'border-violet-400/20 bg-violet-500/[0.03]' : 'border-white/[0.06] bg-[#0f0f0f]')}>
       <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-400">
@@ -319,59 +395,17 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
       </button>
       {open && (
         <ul className="px-3 pb-2.5 space-y-1.5">
-          {tasks.map((t) => {
-            const agent = isAgent(t)
-            const Icon = t.type === 'shell' ? TerminalSquare : agent ? Bot : Activity
-            const label = t.command ?? t.description
-            // An agent row leads to its card in the chat
-            const card = agent && t.toolCallId ? () => document.querySelector(`[data-tool-call="${CSS.escape(t.toolCallId!)}"]`) : null
+          {top.map((t) => {
+            const children = childrenOf(t.id)
             return (
-              <li
-                key={t.id}
-                onClick={card ? () => card()?.scrollIntoView({ behavior: 'smooth', block: 'center' }) : undefined}
-                className={cn('flex items-start gap-2 text-[12px]', card && 'cursor-pointer rounded-md -mx-1.5 px-1.5 py-0.5 hover:bg-white/[0.03]')}
-              >
-                {t.status === 'running' ? (
-                  <Icon className={cn('w-3.5 h-3.5 mt-0.5 shrink-0', agent ? 'text-violet-400' : 'text-blue-400')} />
-                ) : t.status === 'completed' ? (
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/80 mt-0.5 shrink-0" />
-                ) : (
-                  <XCircle className="w-3.5 h-3.5 text-zinc-500 mt-0.5 shrink-0" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className={cn('truncate', t.command && 'font-mono text-[11.5px]', t.status === 'running' ? 'text-zinc-200' : 'text-zinc-500')} title={label}>
-                    {label}
-                  </div>
-                  <div className="text-[11px] text-zinc-600 truncate" title={t.summary}>
-                    {agent ? (
-                      <span className="font-mono px-1 rounded bg-white/[0.05] text-zinc-400">{t.type.replace(/^agent( · )?/, '') || 'agent'}</span>
-                    ) : (
-                      t.type
-                    )}
-                    {t.status !== 'running' && ` · ${t.status}`}
-                    {t.summary && ` · ${t.summary}`}
-                  </div>
-                </div>
-                {t.status === 'running' && (
-                  <button
-                    disabled={stopping.has(t.id)}
-                    onClick={async (e) => {
-                      e.stopPropagation()
-                      setStopping((s) => new Set(s).add(t.id))
-                      await window.api.chat.stopBackground(taskId, t.id).catch(() =>
-                        setStopping((s) => {
-                          const next = new Set(s)
-                          next.delete(t.id)
-                          return next
-                        })
-                      )
-                    }}
-                    title="Stop this task"
-                    className="shrink-0 flex items-center gap-1 h-6 px-2 rounded-md text-[11px] text-zinc-400 border border-white/[0.08] hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
-                  >
-                    {stopping.has(t.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Square className="w-2.5 h-2.5" />}
-                    Stop
-                  </button>
+              <li key={t.id}>
+                {row(t, false)}
+                {children.length > 0 && (
+                  <ul className="mt-1 ml-[7px] pl-3 border-l border-violet-400/15 space-y-1">
+                    {children.map((c) => (
+                      <li key={c.id}>{row(c, true)}</li>
+                    ))}
+                  </ul>
                 )}
               </li>
             )
