@@ -201,6 +201,7 @@ function toolTitle(name: string, input: Record<string, unknown>, rel: (p: string
     case 'todo':
       return 'Update plan'
     default:
+      if (name === 'Skill' && str(input.skill)) return `/${str(input.skill)}${str(input.args) ? ` ${str(input.args)}` : ''}`
       return name.replace(/^mcp__/, '').replace(/__/g, ' · ')
   }
 }
@@ -307,6 +308,14 @@ export function handbackReport(body: string): string {
   const lines = rest.split('\n')
   const indented = lines.filter((l) => l.trim()).every((l) => l.startsWith('  '))
   return (indented ? lines.map((l) => l.slice(2)) : lines).join('\n').trim()
+}
+
+/** A subagent's result without the harness's wrapping: the tools-used tag and a forked skill's preamble. */
+export function agentResult(text: string): string {
+  return text
+    .replace(/^\s*<tools-used-before-summary>[\s\S]*?<\/tools-used-before-summary>\s*/, '')
+    .replace(/^Skill "[^"]+" completed \(forked execution\)\.\s*(Result:\s*)?/, '')
+    .trim()
 }
 
 function firstLine(text: string): string {
@@ -452,11 +461,22 @@ class ClaudeSession implements AgentSession {
             command: tool ? str(tool.input.command) : undefined,
             description: msg.description
           })
+          // A call other than Agent that runs a subagent — a forked skill such as /code-review — gets a subagent card
+          if (msg.tool_use_id && tool && msg.task_type === 'local_agent' && toolKind(tool.name) !== 'task') {
+            this.agentCalls.add(msg.tool_use_id)
+            this.emit({
+              type: 'tool.updated',
+              toolCallId: msg.tool_use_id,
+              kind: 'task',
+              title: msg.description,
+              input: { ...tool.input, subagent_type: msg.subagent_type ?? 'agent', description: msg.description, prompt: msg.prompt }
+            })
+          }
         } else if (msg.subtype === 'task_progress') {
           // A subagent at work: its card shows what it is doing
           const toolCallId = msg.tool_use_id ?? this.taskInfo.get(msg.task_id)?.toolCallId
           const call = toolCallId ? this.tools.get(toolCallId) : undefined
-          if (toolCallId && (this.backgroundAgents.has(toolCallId) || (call && toolKind(call.name) === 'task'))) {
+          if (toolCallId && (this.backgroundAgents.has(toolCallId) || this.agentCalls.has(toolCallId) || (call && toolKind(call.name) === 'task'))) {
             this.emit({
               type: 'tool.updated',
               toolCallId,
@@ -576,11 +596,12 @@ class ClaudeSession implements AgentSession {
             this.tools.delete(block.tool_use_id)
             continue
           }
+          const agentCall = this.agentCalls.delete(block.tool_use_id) || (tool && toolKind(tool.name) === 'task')
           this.emit({
             type: 'tool.completed',
             toolCallId: block.tool_use_id,
             status: failed ? 'error' : 'ok',
-            output,
+            output: agentCall && output ? agentResult(output) : output,
             diff: tool && !failed ? toolDiff(tool.name, tool.input) : undefined
           })
           this.tools.delete(block.tool_use_id)
@@ -655,6 +676,8 @@ class ClaudeSession implements AgentSession {
   private taskInfo = new Map<string, { toolCallId?: string; command?: string; description: string }>()
   /** Agent calls whose subagent runs in the background: their cards wait for task_notification. */
   private backgroundAgents = new Set<string>()
+  /** Calls other than Agent that run a subagent (forked skills). */
+  private agentCalls = new Set<string>()
   /** Reports subagents handed back as messages, by task id. */
   private agentReports = new Map<string, string>()
   /** Agent card of each task that already ended, for a report that comes after its notice. */

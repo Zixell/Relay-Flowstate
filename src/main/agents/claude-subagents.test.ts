@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { handbackReport, isHandbackPointer, isInterimAgentNotice } from './claude-chat'
+import { agentResult, handbackReport, isHandbackPointer, isInterimAgentNotice } from './claude-chat'
 
 describe('subagent reports', () => {
   it('takes the report out of a hand-back frame', () => {
@@ -26,5 +26,11 @@ describe('subagent reports', () => {
     expect(isHandbackPointer(pointer)).toBe(true)
     expect(isInterimAgentNotice('16')).toBe(false)
     expect(isHandbackPointer('16')).toBe(false)
+  })
+
+  it('unwraps a forked skill\'s result', () => {
+    const raw = '<tools-used-before-summary>Bash</tools-used-before-summary>\nSkill "code-review" completed (forked execution).\n\nResult:\n## Findings\n1. sum subtracts'
+    expect(agentResult(raw)).toBe('## Findings\n1. sum subtracts')
+    expect(agentResult('16')).toBe('16')
   })
 })
