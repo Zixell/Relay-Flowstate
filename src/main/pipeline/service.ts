@@ -6,6 +6,7 @@ import { getTaskById, insertMessage, type MessageRow } from '../db'
 import { commitStaged, getCurrentCommit, getWorkingDirStatus, stageFiles } from '../git'
 import { diffSnapshotFiles, snapshotWorkingTree } from '../git/snapshots'
 import { getSetting } from '../settings'
+import { showTaskInMain } from '../windows'
 import { cancelResume } from '../session/auto-resume'
 import {
   expireSidePermissions,
@@ -107,9 +108,7 @@ function start(taskId: string, pipeline: Pipeline, input: UserInput, message: Me
         snapshot: (label) => snapshotWorkingTree(cwd, taskId, label),
         changedFiles: (from, to) => diffSnapshotFiles(cwd, from, to).map((f) => f.path),
         commit: (msg) => commitAll(cwd, msg),
-        notify: (msg) => {
-          if (Notification.isSupported()) new Notification({ title: task.title, body: msg }).show()
-        }
+        notify: (msg) => notify(taskId, task.title, msg)
       }),
       onEvent: (e) => {
         record?.(e)
@@ -158,6 +157,26 @@ function start(taskId: string, pipeline: Pipeline, input: UserInput, message: Me
       void sendMessage(taskId, next.input).catch((e) => console.error('[relay] send failed:', e))
     }
   })
+}
+
+/** Notifications on screen; a dropped reference lets the system one vanish before it shows. */
+const shown = new Set<Notification>()
+
+/** A Notify block: in the app while it is in front (the system hides banners of the front app), else a system notification. */
+function notify(taskId: string, title: string, message: string): void {
+  if (BrowserWindow.getAllWindows().some((w) => w.isFocused())) {
+    send('pipeline:notify', { taskId, title, message })
+    return
+  }
+  if (!Notification.isSupported()) return
+  const n = new Notification({ title, body: message })
+  shown.add(n)
+  n.on('close', () => shown.delete(n))
+  n.on('click', () => {
+    shown.delete(n)
+    showTaskInMain(taskId)
+  })
+  n.show()
 }
 
 function taskStatusAfter(status: RunStatus): 'completed' | 'failed' | 'paused' {

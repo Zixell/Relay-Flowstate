@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download, LogIn } from 'lucide-react'
+import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download, LogIn, Workflow } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -147,6 +147,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             ))}
           </div>
 
+          <GlobalPipelineRow />
+
           <UsageLimits agents={selectable.filter((a) => a.available && a.chat?.limits)} open={open} />
 
           <div className="h-px bg-white/[0.05]" />
@@ -226,6 +228,27 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 }
 
 /** The app's version and its update from the GitHub releases. */
+function GlobalPipelineRow() {
+  const openGlobalPipeline = useAppStore((s) => s.openGlobalPipeline)
+  return (
+    <div className="flex items-start gap-3 px-3 py-3 rounded-lg bg-white/[0.02] border border-white/[0.06]">
+      <Workflow className="w-3.5 h-3.5 mt-0.5 text-violet-300/80 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-zinc-200 leading-snug">Global pipeline</p>
+        <p className="text-[11px] text-zinc-500 leading-relaxed mt-1">
+          Steps around every chat message — review, commit, fix loops — for tasks without a pipeline of their own.
+        </p>
+      </div>
+      <button
+        onClick={openGlobalPipeline}
+        className="shrink-0 h-7 px-2.5 rounded-md text-[11px] text-zinc-300 border border-white/[0.1] hover:bg-white/[0.05]"
+      >
+        Edit
+      </button>
+    </div>
+  )
+}
+
 function UpdatesSection() {
   const u = useUpdates()
   if (!u) return null

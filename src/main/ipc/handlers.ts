@@ -34,7 +34,7 @@ import {
 } from '../git'
 import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
-import { getMessages, getTurns, getTurn, getPipelineRun, getPipelineSteps, type MessageRow } from '../db'
+import { getMessages, getTurns, getTurn, getPipelineRun, getPipelineRuns, getPipelineSteps, type MessageRow } from '../db'
 import { activeRunId, cancelRun, submitMessage } from '../pipeline/service'
 import { loadPipeline, removePipeline, storePipeline } from '../pipeline/store'
 import { validate } from '../pipeline/validate'
@@ -332,6 +332,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('pipeline:run', (_, runId: string) => {
     const run = getPipelineRun(runId)
     return run ? { run, steps: getPipelineSteps(runId) } : null
+  })
+  ipcMain.handle('pipeline:latest', (_, taskId: string) => {
+    const [run] = getPipelineRuns(taskId, 1)
+    return run ? { run, steps: getPipelineSteps(run.id) } : null
   })
   ipcMain.handle('pipeline:active', (_, taskId: string) => activeRunId(taskId))
   ipcMain.handle('pipeline:cancel', (_, taskId: string) => cancelRun(taskId))

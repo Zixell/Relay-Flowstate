@@ -5,7 +5,7 @@ graph: blocks connected by arrows, conditions on arrows, parallel branches and
 bounded loops. Example: agent writes code → independent review → commit on
 pass, "fix the remarks" on fail, at most 3 rounds.
 
-Status: phases 1–2 done (engine, wired to chat sessions, run card in the chat); no editor yet — code in `src/main/pipeline/`.
+Status: phases 1–3 done (engine, chat wiring with a run card, editor) — code in `src/main/pipeline/` and `src/renderer/src/components/pipeline/`.
 
 ## Concepts
 
@@ -156,10 +156,8 @@ survives a restart; a run that was going when the app quit is marked
 - **Editor** — React Flow (xyflow). Palette of blocks, inspector panel for the
   selected block/arrow, live validation: cycles highlighted until a limit is set,
   missing defaults, unreachable blocks, parallel `current` sessions.
-- **Task chat** — when a pipeline is attached, the chat shows a compact run card
-  under the message: blocks with live statuses (pending / running / passed /
-  failed / skipped), current iteration of loops. A held message shows "pre-pipeline
-  running". Stop / open-in-editor buttons.
+- **Task chat** — the latest run as a CI-style strip in the top-right corner
+  (see Wiring), with Stop.
 - **Run view** — the graph with the run's state painted on it; clicking a block
   opens its output (and the transcript of a `new` session). New-session blocks are
   visible only here, not as separate chats.
@@ -182,7 +180,7 @@ survives a restart; a run that was going when the app quit is marked
       with dead paths)
 - [x] 2. Agent step / Static prompt / Action blocks wired to SessionManager;
       new-session runner; recursion guard; run card in chat
-- [ ] 3. Editor on React Flow with live validation; task and global pipelines
+- [x] 3. Editor on React Flow with live validation; task and global pipelines
 - [ ] 4. Run view with per-block output
 - [ ] 5. Tool call block (direct MCP), structured output conditions, templates
 - [ ] 6. Built-in templates: "Review → Commit / Fix", "Push ∥ Update docs"
@@ -203,7 +201,7 @@ survives a restart; a run that was going when the app quit is marked
 
 - `chat:send` and the first prompt of a new task go through `submitMessage`
   (`service.ts`): no pipeline → straight to the agent as before; otherwise the
-  message is shown, a run starts and a `pipeline` card is put into the chat.
+  message is shown and a run starts; a hidden `pipeline` message marks where.
 - Steps on the `current` session use `runTurn` (`session/manager.ts`): waits out
   a turn already going, sends, resolves on `turn.completed` with the turn's texts
   and changed files. Prompt blocks and current-session agent steps appear in the
@@ -222,7 +220,31 @@ survives a restart; a run that was going when the app quit is marked
   next run. Stop in the chat (or on the card) cancels the run and the queue.
 - While a run goes the task shows `running`; per-turn "finished" notifications are
   held back and one comes when the run ends.
+- Progress lives in the chat's top-right corner (`PipelineProgress.tsx`), CI
+  style: a dot per step (passed / failed / running / stopped), steps that ran at
+  the same time stacked in one column; a dot opens the step's output. It shows
+  the task's latest run; a new run takes it over.
+- A Notify block shows an in-app notice while the app is in front (macOS hides
+  banners of the front app) and a system notification otherwise.
 - Tool call blocks fail with "not supported yet" until phase 5.
+
+## Editor (phase 3)
+
+- Task pipeline: the task's **Pipeline** tab — empty state says what applies
+  (global or nothing) and offers to create one, optionally from the global.
+- Global pipeline: Settings → Global pipeline → Edit, a full-window editor.
+- React Flow canvas (`canvas.tsx`): blocks with session chips and a preview,
+  arrows labelled with their condition, loops dashed violet; errors red, warnings
+  amber, a cycle without a limit gets a dashed red outline. New arrows open in
+  the inspector so a loop's limit is set right away.
+- Validation runs live in the renderer (the same `validate.ts`); Save is disabled
+  while there are errors, the issue list selects the block or arrow on click.
+- Inspector (`Inspector.tsx`): per-block fields; agent steps choose session,
+  agent (new session only) and a structured answer (none / pass-fail verdict /
+  custom JSON schema). Arrows: always / if / otherwise, the check (answer field,
+  success, changed files), order, and for loops the limit and what happens after.
+  Renaming a block id updates arrows, loop exits and templates.
+- Combined conditions (`all`/`any`/`not`) run but are not editable in the UI yet.
 
 ## Decisions
 

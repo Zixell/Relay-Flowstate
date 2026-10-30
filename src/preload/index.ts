@@ -195,6 +195,16 @@ const api = {
     delete: (taskId: string | null) => ipcRenderer.invoke('pipeline:delete', taskId),
     validate: (graph: PipelineGraph): Promise<ValidationIssue[]> => ipcRenderer.invoke('pipeline:validate', graph),
     run: (runId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:run', runId),
+    /** The task's most recent run. */
+    latest: (taskId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:latest', taskId),
+    /** A Notify block fired while the app is in front. */
+    onNotify: (callback: (n: { taskId: string; title: string; message: string }) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, n: { taskId: string; title: string; message: string }) => callback(n)
+      ipcRenderer.on('pipeline:notify', listener)
+      return () => {
+        ipcRenderer.removeListener('pipeline:notify', listener)
+      }
+    },
     /** The task's running run, if any. */
     active: (taskId: string): Promise<string | null> => ipcRenderer.invoke('pipeline:active', taskId),
     cancel: (taskId: string) => ipcRenderer.invoke('pipeline:cancel', taskId),

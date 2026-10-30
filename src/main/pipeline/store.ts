@@ -62,7 +62,7 @@ export function recordRun(run: {
     pipeline_id: run.pipeline.id,
     message_id: run.messageId,
     input: run.input,
-    graph_json: JSON.stringify({ nodes: run.pipeline.nodes, edges: run.pipeline.edges })
+    graph_json: JSON.stringify({ name: run.pipeline.name, nodes: run.pipeline.nodes, edges: run.pipeline.edges })
   })
   return (event) => {
     switch (event.type) {

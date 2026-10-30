@@ -160,7 +160,7 @@ export interface PipelineRunRow {
   pipeline_id: string | null
   message_id: string | null
   input: string
-  /** The graph as it was when the run started — the pipeline may have been edited since. */
+  /** The graph (with the pipeline's `name`) as it was when the run started — the pipeline may have been edited since. */
   graph_json: string
   status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
   error: string | null

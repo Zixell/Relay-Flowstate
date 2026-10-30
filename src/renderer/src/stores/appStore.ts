@@ -31,6 +31,8 @@ interface AppState {
   isCreateModalOpen: boolean
   isSettingsOpen: boolean
   isImportOpen: boolean
+  /** The global pipeline's editor. */
+  isGlobalPipelineOpen: boolean
   /** Agent whose sign-in dialog is open. */
   signInAgentId: string | null
   isLoading: boolean
@@ -50,6 +52,8 @@ interface AppState {
   closeSettings: () => void
   openImport: () => void
   closeImport: () => void
+  openGlobalPipeline: () => void
+  closeGlobalPipeline: () => void
   openSignIn: (agentId: string) => void
   closeSignIn: () => void
   addTask: (task: Task) => void
@@ -76,6 +80,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isCreateModalOpen: false,
   isSettingsOpen: false,
   isImportOpen: false,
+  isGlobalPipelineOpen: false,
   signInAgentId: null,
   isLoading: false,
 
@@ -98,6 +103,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeSettings: () => set({ isSettingsOpen: false }),
   openImport: () => set({ isImportOpen: true }),
   closeImport: () => set({ isImportOpen: false }),
+  openGlobalPipeline: () => set({ isGlobalPipelineOpen: true, isSettingsOpen: false }),
+  closeGlobalPipeline: () => set({ isGlobalPipelineOpen: false }),
   openSignIn: (signInAgentId) => set({ signInAgentId }),
   closeSignIn: () => set({ signInAgentId: null }),
 

@@ -27,6 +27,7 @@ import { AgentPicker } from '../chat/AgentSwitch'
 import { ChatView } from '../chat/ChatView'
 import { WorktreeWarning } from './WorktreeWarning'
 import { MergeModal } from '../modals/MergeModal'
+import { TaskPipeline } from '../pipeline/PipelinePanels'
 import { TaskTimeline } from './TaskTimeline'
 import { FileChanges } from './FileChanges'
 import { useAppStore } from '../../stores/appStore'
@@ -37,7 +38,7 @@ interface TaskDetailProps {
   task: Task
 }
 
-type DetailTab = 'chat' | 'console' | 'timeline' | 'files' | 'notes' | 'summary'
+type DetailTab = 'chat' | 'pipeline' | 'console' | 'timeline' | 'files' | 'notes' | 'summary'
 
 /** The task's name; a click turns it into a field. Enter or leaving saves, Esc cancels. */
 function TaskTitle({ task }: { task: Task }) {
@@ -318,6 +319,7 @@ export function TaskDetail({ task }: TaskDetailProps) {
         {(
           [
             { id: 'chat', label: 'Chat' },
+            { id: 'pipeline', label: 'Pipeline' },
             { id: 'console', label: 'Console' },
             { id: 'timeline', label: 'Timeline' },
             { id: 'files', label: `Files (${task.changed_files_count})` },
@@ -344,6 +346,8 @@ export function TaskDetail({ task }: TaskDetailProps) {
       <div className="flex-1 overflow-hidden">
         {/* A new agent means a new session: remount so commands, usage and pickers follow it. */}
         {activeTab === 'chat' && <ChatView key={task.process_type} task={task} />}
+
+        {activeTab === 'pipeline' && <TaskPipeline key={task.id} taskId={task.id} />}
 
         {activeTab === 'console' && (
           <div className="h-full p-5">

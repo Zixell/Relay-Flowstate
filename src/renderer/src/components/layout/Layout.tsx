@@ -8,6 +8,8 @@ import { CreateTaskModal } from '../modals/CreateTaskModal'
 import { SettingsModal } from '../modals/SettingsModal'
 import { ImportSessionsModal } from '../modals/ImportSessionsModal'
 import { SignInHost } from '../modals/SignInDialog'
+import { GlobalPipelineDialog } from '../pipeline/PipelinePanels'
+import { PipelineNotices } from '../pipeline/PipelineNotices'
 
 export function Layout() {
   const selectedTask = useAppStore(selectSelectedTask)
@@ -17,6 +19,8 @@ export function Layout() {
   const closeSettings = useAppStore((s) => s.closeSettings)
   const isImportOpen = useAppStore((s) => s.isImportOpen)
   const closeImport = useAppStore((s) => s.closeImport)
+  const isGlobalPipelineOpen = useAppStore((s) => s.isGlobalPipelineOpen)
+  const closeGlobalPipeline = useAppStore((s) => s.closeGlobalPipeline)
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0a0a0a] text-zinc-100 select-none">
@@ -34,6 +38,8 @@ export function Layout() {
       <SettingsModal open={isSettingsOpen} onClose={closeSettings} />
       <ImportSessionsModal open={isImportOpen} onClose={closeImport} />
       <SignInHost />
+      {isGlobalPipelineOpen && <GlobalPipelineDialog onClose={closeGlobalPipeline} />}
+      <PipelineNotices />
     </div>
   )
 }

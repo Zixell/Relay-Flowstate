@@ -31,7 +31,7 @@ import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
 import { HandoffDivider, LimitBanner, hitUsageLimit, resumeAtOf } from './AgentSwitch'
 import { SignInBanner, needsSignIn } from './SignInBanner'
-import { PipelineRunCard } from './PipelineRunCard'
+import { PipelineProgress } from './PipelineProgress'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -623,8 +623,6 @@ export function ChatView({ task, compact }: Props) {
         return <PermissionPrompt message={m} onRespond={respondPermission} active={m.id === lastPendingPermission} />
       case 'handoff':
         return <HandoffDivider content={m.content} />
-      case 'pipeline':
-        return <PipelineRunCard message={m} />
       case 'pipeline_prompt':
         return <UserBubble message={m} onOpenImage={setViewerSrc} />
       case 'error':
@@ -652,6 +650,11 @@ export function ChatView({ task, compact }: Props) {
     <div className="flex flex-col h-full">
       {viewerSrc && <ImageViewer src={viewerSrc} onClose={() => setViewerSrc(null)} />}
       <div className="relative flex-1 min-h-0">
+      {!compact && (
+        <div className="absolute top-3 right-4 z-10">
+          <PipelineProgress taskId={task.id} />
+        </div>
+      )}
       {away && (
         <button
           onClick={scrollToBottom}
@@ -678,6 +681,8 @@ export function ChatView({ task, compact }: Props) {
           )}
           {state.messages.slice(windowStart).map((m, j) => {
             const i = j + windowStart
+            // A run's progress shows in the corner, not in the conversation
+            if (m.kind === 'pipeline') return null
             return (
             <React.Fragment key={m.id}>
               <div className={cn('chat-item', i > windowStart && spacing(m, state.messages[i - 1]))} data-tool-call={m.tool_call_id ?? undefined}>
