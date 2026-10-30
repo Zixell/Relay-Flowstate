@@ -33,6 +33,8 @@ interface AppState {
   isImportOpen: boolean
   /** The global pipeline's editor. */
   isGlobalPipelineOpen: boolean
+  /** A run to show in its task's Pipeline tab; cleared once shown. */
+  pipelineRunFocus: { taskId: string; runId: string } | null
   /** Agent whose sign-in dialog is open. */
   signInAgentId: string | null
   isLoading: boolean
@@ -53,6 +55,7 @@ interface AppState {
   openImport: () => void
   closeImport: () => void
   openGlobalPipeline: () => void
+  focusPipelineRun: (focus: { taskId: string; runId: string } | null) => void
   closeGlobalPipeline: () => void
   openSignIn: (agentId: string) => void
   closeSignIn: () => void
@@ -81,6 +84,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isSettingsOpen: false,
   isImportOpen: false,
   isGlobalPipelineOpen: false,
+  pipelineRunFocus: null,
   signInAgentId: null,
   isLoading: false,
 
@@ -105,6 +109,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeImport: () => set({ isImportOpen: false }),
   openGlobalPipeline: () => set({ isGlobalPipelineOpen: true, isSettingsOpen: false }),
   closeGlobalPipeline: () => set({ isGlobalPipelineOpen: false }),
+  focusPipelineRun: (pipelineRunFocus) => set({ pipelineRunFocus }),
   openSignIn: (signInAgentId) => set({ signInAgentId }),
   closeSignIn: () => set({ signInAgentId: null }),
 

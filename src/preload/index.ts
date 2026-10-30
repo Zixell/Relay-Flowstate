@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Pipeline, PipelineGraph, PipelineRunRow, PipelineStepRow, RunEvent, ValidationIssue } from '../main/pipeline/types'
+import type { Pipeline, PipelineGraph, PipelineRunRow, PipelineStepRow, RunEvent, TranscriptItem, ValidationIssue } from '../main/pipeline/types'
 
 /** Where an app update stands (see main/updater.ts). */
 interface UpdateState {
@@ -195,6 +195,10 @@ const api = {
     delete: (taskId: string | null) => ipcRenderer.invoke('pipeline:delete', taskId),
     validate: (graph: PipelineGraph): Promise<ValidationIssue[]> => ipcRenderer.invoke('pipeline:validate', graph),
     run: (runId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:run', runId),
+    /** The task's runs, newest first. */
+    runs: (taskId: string): Promise<PipelineRunRow[]> => ipcRenderer.invoke('pipeline:runs', taskId),
+    /** What a step that ran in its own session said and did. */
+    transcript: (stepId: string): Promise<TranscriptItem[]> => ipcRenderer.invoke('pipeline:transcript', stepId),
     /** The task's most recent run. */
     latest: (taskId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:latest', taskId),
     /** A Notify block fired while the app is in front. */

@@ -179,3 +179,10 @@ export interface PipelineStepRow {
   started_at: number
   completed_at: number | null
 }
+
+/** One line of a step session's transcript, as the run view shows it. */
+export interface TranscriptItem {
+  kind: 'user' | 'assistant' | 'tool'
+  text: string
+  status?: 'running' | 'ok' | 'error'
+}

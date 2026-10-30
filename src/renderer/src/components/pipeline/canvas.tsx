@@ -1,6 +1,6 @@
 import React, { createContext, memo, useContext } from 'react'
 import { BaseEdge, EdgeLabelRenderer, Handle, Position, getBezierPath, type EdgeProps, type NodeProps, type Node, type Edge } from '@xyflow/react'
-import { Bot, MessageSquareText, GitCommitHorizontal, TerminalSquare, Bell, Merge, Inbox, Plug } from 'lucide-react'
+import { Bot, MessageSquareText, GitCommitHorizontal, TerminalSquare, Bell, Merge, Inbox, Plug, Check, X, Loader2, Minus } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { PipelineEdge, PipelineNode } from '../../../../main/pipeline/types'
 import { blockPreview, blockTitle, edgeLabel } from './model'
@@ -17,6 +17,8 @@ export interface Marks {
   /** Blocks of loops that still need a limit. */
   unboundedLoop: Set<string>
   agentLabels: Record<string, string>
+  /** In a run view: how each block did (its latest round); blocks the run never reached are absent. */
+  run?: Record<string, { status: 'running' | 'ok' | 'error' | 'cancelled'; rounds: number }>
 }
 
 export const MarksContext = createContext<Marks>({
@@ -60,6 +62,7 @@ export const BlockNode = memo(function BlockNode({ data, selected }: NodeProps<B
   const anchor = node.type === 'anchor'
   const error = marks.errors.has(node.id)
   const warning = !error && marks.warnings.has(node.id)
+  const ran = marks.run?.[node.id]
 
   return (
     <div
@@ -69,6 +72,10 @@ export const BlockNode = memo(function BlockNode({ data, selected }: NodeProps<B
         error && 'border-red-500/70',
         warning && 'border-amber-500/60',
         marks.unboundedLoop.has(node.id) && 'outline outline-1 outline-dashed outline-red-500/70 outline-offset-4',
+        ran?.status === 'ok' && 'border-emerald-500/60',
+        ran?.status === 'error' && 'border-red-500/70',
+        ran?.status === 'running' && 'border-blue-400/70',
+        marks.run && !ran && 'opacity-40',
         selected && 'ring-2 ring-white/40'
       )}
     >
@@ -76,7 +83,17 @@ export const BlockNode = memo(function BlockNode({ data, selected }: NodeProps<B
       <div className="flex items-center gap-2 px-3 pt-2.5">
         <Icon className={cn('w-3.5 h-3.5 shrink-0', anchor ? 'text-blue-400' : 'text-violet-300/80')} />
         <span className="text-[12.5px] font-medium text-zinc-100 truncate">{blockTitle(node)}</span>
-        <span className="ml-auto text-[10px] font-mono text-zinc-600 truncate max-w-[70px]">{node.id}</span>
+        {ran ? (
+          <span className="ml-auto flex items-center gap-1 shrink-0 text-[10.5px] text-zinc-500">
+            {ran.rounds > 1 && <span>×{ran.rounds}</span>}
+            {ran.status === 'ok' && <Check className="w-3.5 h-3.5 text-emerald-400" strokeWidth={3} />}
+            {ran.status === 'error' && <X className="w-3.5 h-3.5 text-red-400" strokeWidth={3} />}
+            {ran.status === 'running' && <Loader2 className="w-3.5 h-3.5 text-blue-300 animate-spin" />}
+            {ran.status === 'cancelled' && <Minus className="w-3.5 h-3.5 text-zinc-500" strokeWidth={3} />}
+          </span>
+        ) : (
+          <span className="ml-auto text-[10px] font-mono text-zinc-600 truncate max-w-[70px]">{node.id}</span>
+        )}
       </div>
       {chip && <div className="px-3 pt-1 text-[10.5px] text-zinc-500">{chip}</div>}
       <div className={cn('px-3 pt-1 pb-2.5 text-[11px] leading-snug line-clamp-2', preview ? 'text-zinc-400' : 'text-zinc-600 italic')}>
@@ -89,7 +106,7 @@ export const BlockNode = memo(function BlockNode({ data, selected }: NodeProps<B
 
 export const ArrowEdge = memo(function ArrowEdge(props: EdgeProps<ArrowEdgeType>) {
   const marks = useContext(MarksContext)
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props
+  const { id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props
   const loop = marks.loops.has(id)
   // A loop goes back to the left: bend it under the blocks instead of through them
   const [path, labelX, labelY] = loop
@@ -105,7 +122,13 @@ export const ArrowEdge = memo(function ArrowEdge(props: EdgeProps<ArrowEdgeType>
         id={id}
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke: color, strokeWidth: selected ? 2.5 : 1.5, strokeDasharray: loop ? '6 4' : undefined }}
+        style={{
+          stroke: color,
+          strokeWidth: selected ? 2.5 : 1.5,
+          strokeDasharray: loop ? '6 4' : undefined,
+          // In a run view, arrows between blocks that both ran stand out
+          opacity: marks.run && !(marks.run[source] && marks.run[target]) ? 0.25 : 1
+        }}
       />
       {label && (
         <EdgeLabelRenderer>

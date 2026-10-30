@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Workflow, Check, X, Loader2, Minus, Square } from 'lucide-react'
+import { Workflow, Check, X, Loader2, Minus, Square, Maximize2 } from 'lucide-react'
+import { useAppStore } from '../../stores/appStore'
 import { cn } from '../../lib/utils'
 import type { PipelineGraph, PipelineRunRow, PipelineStepRow, RunEvent, RunStatus, StepOutput } from '../../../../main/pipeline/types'
 
-interface StepView {
+export interface StepView {
   id: string
   nodeId: string
   activation: number
@@ -14,9 +15,11 @@ interface StepView {
   endedAt?: number
 }
 
-interface RunView {
+export interface RunView {
   id: string
   name: string
+  /** The user message the run started from. */
+  input: string
   status: RunStatus
   error: string | null
   graph: PipelineGraph | null
@@ -25,7 +28,7 @@ interface RunView {
 
 const now = (): number => Date.now() / 1000
 
-function fromRows(run: PipelineRunRow, steps: PipelineStepRow[]): RunView {
+export function fromRows(run: PipelineRunRow, steps: PipelineStepRow[]): RunView {
   let graph: (PipelineGraph & { name?: string }) | null = null
   try {
     graph = JSON.parse(run.graph_json)
@@ -36,6 +39,7 @@ function fromRows(run: PipelineRunRow, steps: PipelineStepRow[]): RunView {
   return {
     id: run.id,
     name,
+    input: run.input,
     status: run.status,
     error: run.error,
     graph,
@@ -51,7 +55,7 @@ function fromRows(run: PipelineRunRow, steps: PipelineStepRow[]): RunView {
   }
 }
 
-function apply(view: RunView, e: RunEvent): RunView {
+export function apply(view: RunView, e: RunEvent): RunView {
   if (e.runId !== view.id) return view
   switch (e.type) {
     case 'step.started':
@@ -120,6 +124,7 @@ function Dot({ status, active, onClick, title }: { status: StepView['status']; a
  * steps stacked. A dot opens the step's output. Lives in the chat's top-right corner.
  */
 export function PipelineProgress({ taskId }: { taskId: string }) {
+  const focusPipelineRun = useAppStore((s) => s.focusPipelineRun)
   const [view, setView] = useState<RunView | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string | null>(null)
@@ -184,6 +189,13 @@ export function PipelineProgress({ taskId }: { taskId: string }) {
         >
           {RUN_LABEL[view.status]}
         </span>
+        <button
+          onClick={() => focusPipelineRun({ taskId, runId: view.id })}
+          title="Open the run on the pipeline graph"
+          className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06]"
+        >
+          <Maximize2 className="w-3 h-3" />
+        </button>
         {!done ? (
           <button onClick={() => window.api.pipelines.cancel(taskId)} title="Stop the pipeline" className="p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.06]">
             <Square className="w-3 h-3" />

@@ -36,7 +36,7 @@ import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktr
 import { setSetting, getSettingForClient } from '../settings'
 import { getMessages, getTurns, getTurn, getPipelineRun, getPipelineRuns, getPipelineSteps, type MessageRow } from '../db'
 import { activeRunId, cancelRun, submitMessage } from '../pipeline/service'
-import { loadPipeline, removePipeline, storePipeline } from '../pipeline/store'
+import { loadPipeline, removePipeline, stepTranscript, storePipeline } from '../pipeline/store'
 import { validate } from '../pipeline/validate'
 import type { Pipeline, PipelineGraph } from '../pipeline/types'
 import { deleteSnapshots, diffSnapshotFiles, diffSnapshots, restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
@@ -337,6 +337,8 @@ export function registerIpcHandlers(): void {
     const [run] = getPipelineRuns(taskId, 1)
     return run ? { run, steps: getPipelineSteps(run.id) } : null
   })
+  ipcMain.handle('pipeline:runs', (_, taskId: string) => getPipelineRuns(taskId))
+  ipcMain.handle('pipeline:transcript', (_, stepId: string) => stepTranscript(stepId))
   ipcMain.handle('pipeline:active', (_, taskId: string) => activeRunId(taskId))
   ipcMain.handle('pipeline:cancel', (_, taskId: string) => cancelRun(taskId))
 

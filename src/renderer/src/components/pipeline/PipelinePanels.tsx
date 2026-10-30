@@ -3,9 +3,51 @@ import { Loader2, Workflow } from 'lucide-react'
 import { useAppStore } from '../../stores/appStore'
 import type { Pipeline, PipelineGraph } from '../../../../main/pipeline/types'
 import { PipelineEditor } from './PipelineEditor'
+import { RunsView } from './RunsView'
+import { cn } from '../../lib/utils'
 
-/** The task's Pipeline tab: its own pipeline, or what applies instead and a way to make one. */
+/** The task's Pipeline tab: the pipeline itself, and the runs it made. */
 export function TaskPipeline({ taskId }: { taskId: string }) {
+  const runFocus = useAppStore((s) => s.pipelineRunFocus)
+  const focusPipelineRun = useAppStore((s) => s.focusPipelineRun)
+  const [view, setView] = useState<'setup' | 'runs'>('setup')
+  const [focusRunId, setFocusRunId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (runFocus?.taskId !== taskId) return
+    setView('runs')
+    setFocusRunId(runFocus.runId)
+    focusPipelineRun(null)
+  }, [runFocus, taskId, focusPipelineRun])
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-1 px-4 h-10 border-b border-white/[0.06] bg-[#0d0d0d] shrink-0">
+        {(
+          [
+            ['setup', 'Pipeline'],
+            ['runs', 'Runs']
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            className={cn(
+              'h-7 px-3 rounded-md text-xs',
+              view === id ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.03]'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 min-h-0">{view === 'runs' ? <RunsView taskId={taskId} focusRunId={focusRunId} /> : <PipelineSetup taskId={taskId} />}</div>
+    </div>
+  )
+}
+
+/** The task's own pipeline, or what applies instead and a way to make one. */
+function PipelineSetup({ taskId }: { taskId: string }) {
   const openGlobalPipeline = useAppStore((s) => s.openGlobalPipeline)
   const isGlobalPipelineOpen = useAppStore((s) => s.isGlobalPipelineOpen)
   const [loaded, setLoaded] = useState(false)

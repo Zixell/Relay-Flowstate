@@ -691,6 +691,11 @@ export function getPipelineRun(id: string): PipelineRunRow | undefined {
   return db.prepare('SELECT * FROM pipeline_runs WHERE id = ?').get(id) as PipelineRunRow | undefined
 }
 
+export function getPipelineStep(id: string): PipelineStepRow | undefined {
+  if (!db) return undefined
+  return db.prepare('SELECT * FROM pipeline_steps WHERE id = ?').get(id) as PipelineStepRow | undefined
+}
+
 export function getPipelineSteps(runId: string): PipelineStepRow[] {
   if (!db) return []
   return db.prepare('SELECT * FROM pipeline_steps WHERE run_id = ? ORDER BY started_at, rowid').all(runId) as PipelineStepRow[]

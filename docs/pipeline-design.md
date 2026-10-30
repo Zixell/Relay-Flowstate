@@ -5,7 +5,7 @@ graph: blocks connected by arrows, conditions on arrows, parallel branches and
 bounded loops. Example: agent writes code → independent review → commit on
 pass, "fix the remarks" on fail, at most 3 rounds.
 
-Status: phases 1–3 done (engine, chat wiring with a run card, editor) — code in `src/main/pipeline/` and `src/renderer/src/components/pipeline/`.
+Status: phases 1–4 done (engine, chat wiring with a progress strip, editor, run view) — code in `src/main/pipeline/` and `src/renderer/src/components/pipeline/`.
 
 ## Concepts
 
@@ -158,9 +158,13 @@ survives a restart; a run that was going when the app quit is marked
   missing defaults, unreachable blocks, parallel `current` sessions.
 - **Task chat** — the latest run as a CI-style strip in the top-right corner
   (see Wiring), with Stop.
-- **Run view** — the graph with the run's state painted on it; clicking a block
-  opens its output (and the transcript of a `new` session). New-session blocks are
-  visible only here, not as separate chats.
+- **Run view** — task → Pipeline → Runs (or the expand button on the chat's
+  progress strip): the task's runs newest first; the chosen run's graph (the
+  snapshot taken when it started) painted with each block's latest status and
+  round count, blocks it never reached dimmed. A block lists its rounds with
+  output, JSON, changed files and error; a `new`-session step can show the
+  agent's session, read back through the agent's history (`pipeline:transcript`).
+  New-session blocks are visible only here, not as separate chats.
 - **Global pipelines** — in Settings.
 
 ## Hooks into the existing code
@@ -181,7 +185,7 @@ survives a restart; a run that was going when the app quit is marked
 - [x] 2. Agent step / Static prompt / Action blocks wired to SessionManager;
       new-session runner; recursion guard; run card in chat
 - [x] 3. Editor on React Flow with live validation; task and global pipelines
-- [ ] 4. Run view with per-block output
+- [x] 4. Run view with per-block output
 - [ ] 5. Tool call block (direct MCP), structured output conditions, templates
 - [ ] 6. Built-in templates: "Review → Commit / Fix", "Push ∥ Update docs"
 

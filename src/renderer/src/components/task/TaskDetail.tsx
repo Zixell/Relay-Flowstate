@@ -106,6 +106,11 @@ function worktreeOptedOut(task: Task): boolean {
 
 export function TaskDetail({ task }: TaskDetailProps) {
   const [activeTab, setActiveTab] = useState<DetailTab>('chat')
+  // "Open the run" from the chat's progress strip
+  const runFocus = useAppStore((s) => s.pipelineRunFocus)
+  useEffect(() => {
+    if (runFocus?.taskId === task.id) setActiveTab('pipeline')
+  }, [runFocus, task.id])
   const [notes, setNotes] = useState(task.notes ?? '')
   const [notesSaved, setNotesSaved] = useState(false)
   const [summaries, setSummaries] = useState<SessionSummaryEntry[]>([])
