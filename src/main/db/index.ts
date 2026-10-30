@@ -146,6 +146,46 @@ function createSchema(db: Database.Database): void {
   `)
   // The agent's own marker for the end of a turn (message uuid, turn id) — where a fork continues from.
   try { db.exec('ALTER TABLE turns ADD COLUMN checkpoint TEXT') } catch { /* already exists */ }
+
+  // --- Pipelines (docs/pipeline-design.md) ---
+  // A pipeline with no task is the global one; the index allows one global and one per task.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id TEXT PRIMARY KEY,
+      task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      graph_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pipelines_scope ON pipelines(COALESCE(task_id, ''));
+
+    CREATE TABLE IF NOT EXISTS pipeline_runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      pipeline_id TEXT,
+      message_id TEXT,
+      input TEXT NOT NULL,
+      graph_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_pipeline_runs_task ON pipeline_runs(task_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS pipeline_steps (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+      node_id TEXT NOT NULL,
+      activation INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      output_json TEXT,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_pipeline_steps_run ON pipeline_steps(run_id, started_at);
+  `)
 }
 
 // --- Project queries ---
@@ -567,4 +607,115 @@ export function updateTaskChatSettings(id: string, fields: { model?: string; mod
   db.prepare(
     'UPDATE tasks SET model = COALESCE(?, model), mode = COALESCE(?, mode), updated_at = unixepoch() WHERE id = ?'
   ).run(fields.model ?? null, fields.mode ?? null, id)
+}
+
+// --- Pipelines ---
+export interface PipelineRow {
+  id: string
+  /** Null for the global pipeline. */
+  task_id: string | null
+  name: string
+  graph_json: string
+  created_at: number
+  updated_at: number
+}
+
+export function getPipeline(taskId: string | null): PipelineRow | undefined {
+  if (!db) return undefined
+  return db.prepare('SELECT * FROM pipelines WHERE task_id IS ?').get(taskId) as PipelineRow | undefined
+}
+
+/** Replaces the pipeline of the same scope. */
+export function savePipeline(row: { id: string; task_id: string | null; name: string; graph_json: string }): void {
+  if (!db) return
+  db.prepare(
+    `INSERT INTO pipelines (id, task_id, name, graph_json) VALUES (@id, @task_id, @name, @graph_json)
+     ON CONFLICT(COALESCE(task_id, '')) DO UPDATE SET id = excluded.id, name = excluded.name,
+       graph_json = excluded.graph_json, updated_at = unixepoch()`
+  ).run(row)
+}
+
+export function deletePipeline(taskId: string | null): void {
+  if (!db) return
+  db.prepare('DELETE FROM pipelines WHERE task_id IS ?').run(taskId)
+}
+
+export interface PipelineRunRow {
+  id: string
+  task_id: string
+  pipeline_id: string | null
+  message_id: string | null
+  input: string
+  /** The graph as it was when the run started — the pipeline may have been edited since. */
+  graph_json: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  error: string | null
+  started_at: number
+  completed_at: number | null
+}
+
+export interface PipelineStepRow {
+  id: string
+  run_id: string
+  node_id: string
+  activation: number
+  status: 'running' | 'ok' | 'error' | 'cancelled'
+  /** JSON of the step's `StepOutput`. */
+  output_json: string | null
+  started_at: number
+  completed_at: number | null
+}
+
+export function insertPipelineRun(run: {
+  id: string
+  task_id: string
+  pipeline_id: string | null
+  message_id: string | null
+  input: string
+  graph_json: string
+}): void {
+  if (!db) return
+  db.prepare(
+    `INSERT INTO pipeline_runs (id, task_id, pipeline_id, message_id, input, graph_json, status, started_at)
+     VALUES (@id, @task_id, @pipeline_id, @message_id, @input, @graph_json, 'running', unixepoch())`
+  ).run(run)
+}
+
+export function completePipelineRun(id: string, status: PipelineRunRow['status'], error?: string): void {
+  if (!db) return
+  db.prepare('UPDATE pipeline_runs SET status = ?, error = ?, completed_at = unixepoch() WHERE id = ?').run(status, error ?? null, id)
+  // Steps the run stopped before they finished
+  db.prepare(`UPDATE pipeline_steps SET status = 'cancelled', completed_at = unixepoch() WHERE run_id = ? AND status = 'running'`).run(id)
+}
+
+export function insertPipelineStep(step: { id: string; run_id: string; node_id: string; activation: number }): void {
+  if (!db) return
+  db.prepare(
+    `INSERT INTO pipeline_steps (id, run_id, node_id, activation, status, started_at)
+     VALUES (@id, @run_id, @node_id, @activation, 'running', unixepoch())`
+  ).run(step)
+}
+
+export function completePipelineStep(id: string, status: 'ok' | 'error', outputJson: string): void {
+  if (!db) return
+  db.prepare('UPDATE pipeline_steps SET status = ?, output_json = ?, completed_at = unixepoch() WHERE id = ?').run(status, outputJson, id)
+}
+
+export function getPipelineRuns(taskId: string, limit = 50): PipelineRunRow[] {
+  if (!db) return []
+  return db
+    .prepare('SELECT * FROM pipeline_runs WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?')
+    .all(taskId, limit) as PipelineRunRow[]
+}
+
+export function getPipelineSteps(runId: string): PipelineStepRow[] {
+  if (!db) return []
+  return db.prepare('SELECT * FROM pipeline_steps WHERE run_id = ? ORDER BY started_at, rowid').all(runId) as PipelineStepRow[]
+}
+
+/** On app start no run can still be going: the sessions its steps ran in are gone. */
+export function resetRunningPipelineRuns(): void {
+  if (!db) return
+  db.prepare(`UPDATE pipeline_steps SET status = 'cancelled', completed_at = unixepoch() WHERE status = 'running'`).run()
+  db.prepare(`UPDATE pipeline_runs SET status = 'interrupted', completed_at = unixepoch() WHERE status = 'running'`).run()
 }

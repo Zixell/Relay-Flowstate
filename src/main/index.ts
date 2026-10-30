@@ -1,7 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { initDatabase, resetRunningTasks, resetRunningTurns, convertLegacyTasks } from './db'
+import { initDatabase, resetRunningTasks, resetRunningTurns, resetRunningPipelineRuns, convertLegacyTasks } from './db'
 import { disposeAllSessions, startAutoResume } from './session/manager'
 import { closeAllConsoles } from './console/manager'
 import { cancelAllLogins } from './session/sign-in'
@@ -95,6 +95,7 @@ app.whenReady().then(() => {
     if (converted) console.log(`[relay] converted ${converted} terminal task(s) to chat`)
     resetRunningTasks()
     resetRunningTurns()
+    resetRunningPipelineRuns()
     loadSettings()
     migrateAgentSettings()
     startAutoResume()
