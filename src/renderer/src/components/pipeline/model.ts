@@ -1,7 +1,7 @@
 import type { Condition, PipelineEdge, PipelineGraph, PipelineNode } from '../../../../main/pipeline/types'
 
-/** Blocks the palette offers. Tool calls come later. */
-export type BlockKind = 'agent' | 'prompt' | 'commit' | 'shell' | 'notify' | 'join'
+/** Blocks the palette offers. */
+export type BlockKind = 'agent' | 'prompt' | 'tool' | 'commit' | 'shell' | 'notify' | 'join'
 
 export const VERDICT_SCHEMA = {
   type: 'object',
@@ -20,6 +20,7 @@ export const emptyGraph = (): PipelineGraph => ({
 const ID_BASE: Record<BlockKind, string> = {
   agent: 'agent',
   prompt: 'prompt',
+  tool: 'tool',
   commit: 'commit',
   shell: 'shell',
   notify: 'notify',
@@ -41,6 +42,8 @@ export function newBlock(kind: BlockKind, taken: Iterable<string>, position: { x
       return { id, type: 'agent', session: 'new', prompt: '', position }
     case 'prompt':
       return { id, type: 'prompt', prompt: '', position }
+    case 'tool':
+      return { id, type: 'tool', server: '', tool: '', args: {}, position }
     case 'commit':
       return { id, type: 'action', action: 'commit', message: '', position }
     case 'shell':

@@ -23,7 +23,8 @@ function fromRow(row: PipelineRow): Pipeline {
     name: row.name,
     scope: row.task_id ? { kind: 'task', taskId: row.task_id } : { kind: 'global' },
     nodes: graph.nodes,
-    edges: graph.edges
+    edges: graph.edges,
+    budget: graph.budget
   }
 }
 
@@ -44,7 +45,7 @@ export function loadPipeline(taskId: string | null): Pipeline | undefined {
 export function storePipeline(p: Pipeline): ValidationIssue[] {
   const { ok, issues } = validate(p)
   if (!ok) return issues
-  savePipeline({ id: p.id, task_id: taskIdOf(p), name: p.name, graph_json: JSON.stringify({ nodes: p.nodes, edges: p.edges }) })
+  savePipeline({ id: p.id, task_id: taskIdOf(p), name: p.name, graph_json: JSON.stringify({ nodes: p.nodes, edges: p.edges, budget: p.budget }) })
   return issues
 }
 
@@ -66,7 +67,7 @@ export function recordRun(run: {
     pipeline_id: run.pipeline.id,
     message_id: run.messageId,
     input: run.input,
-    graph_json: JSON.stringify({ name: run.pipeline.name, nodes: run.pipeline.nodes, edges: run.pipeline.edges })
+    graph_json: JSON.stringify({ name: run.pipeline.name, nodes: run.pipeline.nodes, edges: run.pipeline.edges, budget: run.pipeline.budget })
   })
   return (event) => {
     switch (event.type) {

@@ -168,6 +168,7 @@ export function PipelineProgress({ taskId }: { taskId: string }) {
     return node?.type === 'anchor' ? 'Input prompt' : nodeId
   }
   const cols = useMemo(() => columns(view?.steps ?? []), [view?.steps])
+  const spent = useMemo(() => (view ? usage(view) : null), [view])
   const opened = view?.steps.find((s) => s.id === open)
 
   if (!view || hidden === view.id) return null
@@ -206,6 +207,8 @@ export function PipelineProgress({ taskId }: { taskId: string }) {
           </button>
         )}
       </div>
+
+      {spent && <div className="px-3 pt-1 text-[10.5px] text-zinc-500">{spent}</div>}
 
       <div className="flex items-center px-3 py-3 overflow-x-auto">
         {cols.map((col, i) => (
@@ -254,4 +257,20 @@ export function PipelineProgress({ taskId }: { taskId: string }) {
       {view.error && !opened && <div className="border-t border-white/[0.06] px-3 py-2 text-red-300/90 whitespace-pre-wrap break-words">{view.error}</div>}
     </div>
   )
+}
+
+/** Agent turns and reported cost of a run, against its budget: "3/10 turns · $0.42 of $2". */
+export function usage(view: RunView): string | null {
+  const nodes = new Map((view.graph?.nodes ?? []).map((n) => [n.id, n]))
+  const turns = view.steps.filter((s) => {
+    const type = nodes.get(s.nodeId)?.type
+    return type === 'anchor' || type === 'prompt' || type === 'agent'
+  }).length
+  const cost = view.steps.reduce((sum, s) => sum + (s.output?.costUsd ?? 0), 0)
+  const budget = view.graph?.budget
+  const parts = [
+    `${turns}${budget?.maxTurns ? `/${budget.maxTurns}` : ''} turn${(budget?.maxTurns ?? turns) === 1 ? '' : 's'}`,
+    cost > 0 || budget?.maxCostUsd ? `$${cost.toFixed(2)}${budget?.maxCostUsd ? ` of $${budget.maxCostUsd}` : ''}` : null
+  ].filter(Boolean)
+  return turns || cost ? parts.join(' · ') : null
 }

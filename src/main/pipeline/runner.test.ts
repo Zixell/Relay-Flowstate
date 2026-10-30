@@ -51,6 +51,7 @@ function deps(over: Partial<RunnerDeps> = {}): RunnerDeps & { turns: { text: str
     changedFiles: (from, to) => [`${from}..${to}`],
     commit: (message) => ({ status: 'ok', output: message }),
     notify: () => {},
+    callTool: async (server, tool, args) => ({ status: 'ok', output: `${server}.${tool}`, json: args }),
     ...over
   }
 }
@@ -130,6 +131,13 @@ describe('runner', () => {
     expect(out).toEqual({ status: 'ok', output: 'add login|{"verdict":"pass"}', exitCode: 0 })
     const failed = await createRunner(deps()).run({ id: 'sh', type: 'action', action: 'shell', command: 'echo nope; exit 3' }, ctx(), signal())
     expect(failed).toMatchObject({ status: 'error', exitCode: 3, output: 'nope\n' })
+  })
+})
+
+describe('tool blocks', () => {
+  it('call the MCP tool with the filled-in arguments', async () => {
+    const out = await createRunner(deps()).run({ id: 't', type: 'tool', server: 'gitlab', tool: 'create_mr', args: { title: 'x' } }, ctx(), signal())
+    expect(out).toEqual({ status: 'ok', output: 'gitlab.create_mr', json: { title: 'x' } })
   })
 })
 

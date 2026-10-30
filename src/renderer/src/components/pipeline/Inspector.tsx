@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { AgentDescriptor } from '../../types'
 import type { CompareOp, Condition, PipelineEdge, PipelineNode } from '../../../../main/pipeline/types'
-import { VERDICT_SCHEMA, blockTitle } from './model'
+import { VERDICT_SCHEMA, blockTitle, conditionSummary } from './model'
 
 const field = 'w-full rounded-md border border-white/[0.08] bg-black/30 px-2.5 py-1.5 text-[12px] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-white/25'
 
@@ -67,6 +67,7 @@ export function NodeInspector({
   node,
   agents,
   ids,
+  mcpTaskId,
   onChange,
   onRename,
   onDelete
@@ -74,6 +75,8 @@ export function NodeInspector({
   node: PipelineNode
   agents: AgentDescriptor[]
   ids: string[]
+  /** Whose project's MCP servers a Tool block can pick; null for the global pipeline. */
+  mcpTaskId: string | null
   onChange: (next: PipelineNode) => void
   onRename: (next: string) => void
   onDelete: () => void
@@ -163,6 +166,7 @@ export function NodeInspector({
           <input value={node.message} onChange={(e) => onChange({ ...node, message: e.target.value })} className={field} />
         </Row>
       )}
+      {node.type === 'tool' && <ToolFields node={node} taskId={mcpTaskId} onChange={onChange} />}
       {node.type === 'join' && <p className="text-[11.5px] text-zinc-500 leading-relaxed">Goes on once every parallel branch that can still reach it has arrived.</p>}
     </div>
   )
@@ -254,12 +258,7 @@ export function EdgeInspector({
     const { condition: _c, isDefault: _d, order: _o, ...rest } = edge
     if (next === 'always') onChange(rest)
     else if (next === 'else') onChange({ ...rest, isDefault: true })
-    else onChange({ ...rest, condition: c ?? { kind: 'output', path: 'json.verdict', op: 'eq', value: 'pass' } })
-  }
-  const setCheck = (kind: CheckKind): void => {
-    const next: Condition =
-      kind === 'status' ? { kind: 'status', equals: 'error' } : kind === 'filesChanged' ? { kind: 'filesChanged' } : { kind: 'output', path: 'json.verdict', op: 'eq', value: 'pass' }
-    onChange({ ...edge, condition: next })
+    else onChange({ ...rest, condition: c ?? DEFAULT_CHECK })
   }
 
   return (
@@ -290,49 +289,7 @@ export function EdgeInspector({
 
       {c && when === 'if' && (
         <>
-          {c.kind === 'all' || c.kind === 'any' || c.kind === 'not' ? (
-            <p className="text-[11.5px] text-zinc-500">This combined condition can only be changed in the pipeline JSON for now.</p>
-          ) : (
-            <Row label="Check">
-              <Select
-                value={c.kind}
-                options={[
-                  { id: 'output', label: 'A field of the answer' },
-                  { id: 'status', label: 'Whether the block succeeded' },
-                  { id: 'filesChanged', label: 'Whether files changed' }
-                ]}
-                onChange={setCheck}
-              />
-            </Row>
-          )}
-          {c.kind === 'output' && (
-            <>
-              <Row label="Field" hint={<><code className="text-zinc-400">json.verdict</code> for a structured answer, <code className="text-zinc-400">output</code> for the text, <code className="text-zinc-400">exitCode</code> for a command.</>}>
-                <input value={c.path} onChange={(e) => onChange({ ...edge, condition: { ...c, path: e.target.value } })} className={cn(field, 'font-mono')} />
-              </Row>
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={c.op} options={OP_OPTIONS} onChange={(op) => onChange({ ...edge, condition: { ...c, op } })} />
-                {c.op !== 'exists' && (
-                  <input value={String(c.value ?? '')} onChange={(e) => onChange({ ...edge, condition: { ...c, value: e.target.value } })} className={field} placeholder="value" />
-                )}
-              </div>
-            </>
-          )}
-          {c.kind === 'status' && (
-            <Select
-              value={c.equals}
-              options={[
-                { id: 'ok', label: 'Succeeded' },
-                { id: 'error', label: 'Failed' }
-              ]}
-              onChange={(equals) => onChange({ ...edge, condition: { kind: 'status', equals } })}
-            />
-          )}
-          {c.kind === 'filesChanged' && (
-            <Row label="Only these files (optional)" hint="A glob such as src/**/*.ts; empty means any file.">
-              <input value={c.glob ?? ''} onChange={(e) => onChange({ ...edge, condition: { kind: 'filesChanged', glob: e.target.value || undefined } })} className={cn(field, 'font-mono')} />
-            </Row>
-          )}
+          <ConditionEditor condition={c} onChange={(condition) => onChange({ ...edge, condition })} />
           <Row label="Order" hint="Checked from the lowest number up.">
             <input
               type="number"
@@ -370,5 +327,215 @@ export function EdgeInspector({
         </div>
       )}
     </div>
+  )
+}
+
+type Check = Extract<Condition, { kind: 'output' | 'status' | 'filesChanged' }>
+/** One line of a condition: a check, possibly negated. */
+type Item = Check | { kind: 'not'; of: Check }
+
+const DEFAULT_CHECK: Check = { kind: 'output', path: 'json.verdict', op: 'eq', value: 'pass' }
+const isCheck = (c: Condition): c is Check => c.kind === 'output' || c.kind === 'status' || c.kind === 'filesChanged'
+const isItem = (c: Condition): c is Item => isCheck(c) || (c.kind === 'not' && isCheck(c.of))
+
+/** A single check, or all / any of several, each of which can be negated. Deeper nesting is shown, not edited. */
+function ConditionEditor({ condition, onChange }: { condition: Condition; onChange: (c: Condition) => void }) {
+  const group = condition.kind === 'all' || condition.kind === 'any' ? condition : null
+  const editable = group ? group.of.every(isItem) : isItem(condition)
+  if (!editable) {
+    return (
+      <div className="flex flex-col gap-2 text-[11.5px] text-zinc-500">
+        <span>This condition is nested deeper than the editor shows: {conditionSummary(condition)}</span>
+        <button onClick={() => onChange(DEFAULT_CHECK)} className="self-start text-violet-300 hover:text-violet-200">
+          Start over
+        </button>
+      </div>
+    )
+  }
+  const items = (group ? group.of : [condition]) as Item[]
+  const mode = group ? group.kind : 'one'
+  const write = (list: Item[], m: typeof mode = mode): void => onChange(m === 'one' ? list[0] : { kind: m, of: list })
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <Row label="Condition">
+        <Select
+          value={mode}
+          options={[
+            { id: 'one', label: 'One check' },
+            { id: 'all', label: 'All of these checks' },
+            { id: 'any', label: 'Any of these checks' }
+          ]}
+          onChange={(m) => write(m === 'one' ? items.slice(0, 1) : items, m)}
+        />
+      </Row>
+      {items.map((item, i) => (
+        <div key={i} className="flex flex-col gap-2 rounded-lg border border-white/[0.06] bg-white/[0.015] p-2.5">
+          <CheckEditor
+            item={item}
+            onChange={(next) => write(items.map((x, j) => (j === i ? next : x)))}
+            onRemove={group && items.length > 1 ? () => write(items.filter((_, j) => j !== i)) : undefined}
+          />
+        </div>
+      ))}
+      {group && (
+        <button onClick={() => write([...items, DEFAULT_CHECK])} className="self-start flex items-center gap-1 text-[11.5px] text-violet-300 hover:text-violet-200">
+          <Plus className="w-3 h-3" />
+          Add a check
+        </button>
+      )}
+    </div>
+  )
+}
+
+function CheckEditor({ item, onChange, onRemove }: { item: Item; onChange: (i: Item) => void; onRemove?: () => void }) {
+  const negated = item.kind === 'not'
+  const c = item.kind === 'not' ? item.of : item
+  const set = (next: Check): void => onChange(negated ? { kind: 'not', of: next } : next)
+  const setKind = (kind: CheckKind): void =>
+    set(kind === 'status' ? { kind: 'status', equals: 'error' } : kind === 'filesChanged' ? { kind: 'filesChanged' } : DEFAULT_CHECK)
+
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <Select
+            value={c.kind}
+            options={[
+              { id: 'output', label: 'A field of the answer' },
+              { id: 'status', label: 'Whether the block succeeded' },
+              { id: 'filesChanged', label: 'Whether files changed' }
+            ]}
+            onChange={setKind}
+          />
+        </div>
+        <label className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer" title="The check must NOT hold">
+          <input type="checkbox" checked={negated} onChange={(e) => onChange(e.target.checked ? { kind: 'not', of: c } : c)} className="accent-violet-500" />
+          not
+        </label>
+        {onRemove && (
+          <button onClick={onRemove} title="Remove the check" className="p-1 rounded text-zinc-500 hover:text-red-300">
+            <X className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+      {c.kind === 'output' && (
+        <>
+          <input
+            value={c.path}
+            onChange={(e) => set({ ...c, path: e.target.value })}
+            className={cn(field, 'font-mono')}
+            placeholder="json.verdict"
+            title="json.<field> for a structured answer, output for the text, exitCode for a command"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <Select value={c.op} options={OP_OPTIONS} onChange={(op) => set({ ...c, op })} />
+            {c.op !== 'exists' && <input value={String(c.value ?? '')} onChange={(e) => set({ ...c, value: e.target.value })} className={field} placeholder="value" />}
+          </div>
+        </>
+      )}
+      {c.kind === 'status' && (
+        <Select
+          value={c.equals}
+          options={[
+            { id: 'ok', label: 'Succeeded' },
+            { id: 'error', label: 'Failed' }
+          ]}
+          onChange={(equals) => set({ kind: 'status', equals })}
+        />
+      )}
+      {c.kind === 'filesChanged' && (
+        <input
+          value={c.glob ?? ''}
+          onChange={(e) => set({ kind: 'filesChanged', glob: e.target.value || undefined })}
+          className={cn(field, 'font-mono')}
+          placeholder="any file, or a glob: src/**/*.ts"
+        />
+      )}
+    </>
+  )
+}
+
+type ToolInfo = Awaited<ReturnType<typeof window.api.pipelines.mcpTools>>[number]
+
+/** Server, tool and one field per argument of the tool's schema. */
+function ToolFields({ node, taskId, onChange }: { node: Extract<PipelineNode, { type: 'tool' }>; taskId: string | null; onChange: (n: PipelineNode) => void }) {
+  const [servers, setServers] = useState<{ name: string; scope: string }[] | null>(null)
+  const [tools, setTools] = useState<ToolInfo[] | 'loading' | { error: string } | null>(null)
+
+  useEffect(() => {
+    void window.api.pipelines.mcpServers(taskId).then(setServers)
+  }, [taskId])
+
+  useEffect(() => {
+    if (!node.server) return setTools(null)
+    let cancelled = false
+    setTools('loading')
+    window.api.pipelines
+      .mcpTools(taskId, node.server)
+      .then((list) => !cancelled && setTools(list))
+      .catch((err: unknown) => !cancelled && setTools({ error: err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err) }))
+    return () => {
+      cancelled = true
+    }
+  }, [taskId, node.server])
+
+  const tool = Array.isArray(tools) ? tools.find((t) => t.name === node.tool) : undefined
+  const props = tool?.inputSchema.properties ?? {}
+  const required = new Set(tool?.inputSchema.required ?? [])
+  // Arguments the schema does not know (e.g. the tool changed) stay visible so they can be cleared
+  const keys = [...new Set([...Object.keys(props), ...Object.keys(node.args)])]
+
+  return (
+    <>
+      <Row
+        label="MCP server"
+        hint={taskId ? "Your Claude Code MCP servers: user ones, and this project's (~/.claude.json, .mcp.json)." : 'Your user-level Claude Code MCP servers (~/.claude.json). Project servers can be called from a task pipeline.'}
+      >
+        <Select
+          value={node.server}
+          options={[{ id: '', label: servers ? (servers.length ? 'Choose a server' : 'No MCP servers configured') : 'Loading…' }, ...(servers ?? []).map((sv) => ({ id: sv.name, label: `${sv.name} · ${sv.scope}` }))]}
+          onChange={(server) => onChange({ ...node, server, tool: '', args: {} })}
+        />
+      </Row>
+      {node.server && (
+        <Row label="Tool">
+          {tools === 'loading' ? (
+            <span className="flex items-center gap-2 text-[11.5px] text-zinc-500">
+              <Loader2 className="w-3 h-3 animate-spin" /> Starting the server…
+            </span>
+          ) : tools && 'error' in tools ? (
+            <span className="text-[11.5px] text-red-300/90 break-words">{tools.error}</span>
+          ) : (
+            <Select
+              value={node.tool}
+              options={[{ id: '', label: 'Choose a tool' }, ...(tools ?? []).map((t) => ({ id: t.name, label: t.name }))]}
+              onChange={(name) => onChange({ ...node, tool: name, args: {} })}
+            />
+          )}
+        </Row>
+      )}
+      {tool?.description && <p className="text-[11px] text-zinc-500 leading-relaxed -mt-2">{tool.description}</p>}
+      {node.tool &&
+        keys.map((key) => {
+          const p = props[key]
+          const type = Array.isArray(p?.type) ? p?.type.join(' | ') : p?.type
+          return (
+            <Row key={key} label={`${key}${required.has(key) ? ' *' : ''}${type ? ` · ${type}` : ''}`} hint={p ? p.description : 'Not in the tool\'s arguments any more'}>
+              <input
+                value={String(node.args[key] ?? '')}
+                onChange={(e) => {
+                  const args = { ...node.args, [key]: e.target.value }
+                  if (!e.target.value && !p) delete args[key]
+                  onChange({ ...node, args })
+                }}
+                placeholder={type === 'object' || type === 'array' ? 'JSON' : undefined}
+                className={cn(field, 'font-mono')}
+              />
+            </Row>
+          )
+        })}
+      {node.tool && <p className="text-[10.5px] text-zinc-600 leading-snug">{TEMPLATE_HINT} Numbers, true/false and JSON are converted to what the tool expects.</p>}
+    </>
   )
 }

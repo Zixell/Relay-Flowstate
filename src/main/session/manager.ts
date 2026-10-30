@@ -38,6 +38,7 @@ import { getSetting } from '../settings'
 import { blockedResetAt } from './limit-reset'
 import { cancelResume, initAutoResume, scheduleResume } from './auto-resume'
 import { recordLimits } from './account-limits'
+import { changedBetween, pathsTouchedBy, scanTree, type TreeState } from '../pipeline/tree'
 
 interface TaskRow {
   id: string
@@ -72,6 +73,12 @@ interface LiveSession {
   turnTexts: string[]
   /** Last error the agent reported in the current turn. */
   turnError?: string
+  /** For a pipeline's turn outside git: the tree before it, to tell what changed. */
+  turnTree?: TreeState
+  /** Files the agent's own tool calls say it edited this turn. */
+  turnTouched: Set<string>
+  /** The session's running cost after its last turn — a turn's own cost is the difference. */
+  costTotal?: number
   /** Waiting for the current turn to end (pipeline steps). */
   turnWaiters: ((result: TurnResult) => void)[]
   unsubscribe: () => void
@@ -84,6 +91,8 @@ export interface TurnResult {
   texts: string[]
   changedFiles: string[]
   error?: string
+  /** What the turn cost, when the agent reports it. */
+  costUsd?: number
 }
 
 /** What the renderer receives on `chat:event:<taskId>`. */
@@ -207,6 +216,7 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     lastText: '',
     background: [],
     turnTexts: [],
+    turnTouched: new Set(),
     turnWaiters: [],
     unsubscribe: () => {}
   }
@@ -306,6 +316,7 @@ export function persistEvent(taskId: string, turnId: string | null, e: AgentEven
 
 function handleEvent(s: LiveSession, e: AgentEvent): void {
   const { taskId } = s
+  for (const p of pathsTouchedBy(e, s.cwd)) s.turnTouched.add(p)
 
   switch (e.type) {
     case 'session.started':
@@ -317,7 +328,10 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
       s.turnId = e.turnId
       s.turnTexts = []
       s.turnError = undefined
+      s.turnTouched = new Set()
       const before = snapshotWorkingTree(s.cwd, taskId, `${e.turnId}-before`) ?? undefined
+      // Without git a pipeline still needs to know what the turn changed
+      s.turnTree = !before && pipelineBusy.has(taskId) ? scanTree(s.cwd) : undefined
       insertTurn({ id: e.turnId, task_id: taskId, commit_before: before })
       break
     }
@@ -416,7 +430,16 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   completeTurn(e.turnId, { status, commit_after: after, usage_json: e.usage ? JSON.stringify(e.usage) : undefined, checkpoint: e.checkpoint })
 
   const changed = turn?.commit_before && after ? diffSnapshotFiles(s.cwd, turn.commit_before, after) : []
-  resolveTurn(s, { reason: e.reason, texts: s.turnTexts, changedFiles: changed.map((f) => f.path), error: s.turnError })
+  // Agents report a running total; this turn's cost is what it added
+  const total = e.usage?.costUsd
+  const turnCost = total === undefined ? undefined : s.costTotal !== undefined && total >= s.costTotal ? total - s.costTotal : total
+  if (total !== undefined) s.costTotal = total
+  if (s.turnWaiters.length) {
+    const scanned = s.turnTree ? changedBetween(s.cwd, s.turnTree, scanTree(s.cwd)) : []
+    const files = [...new Set([...changed.map((f) => f.path), ...scanned, ...s.turnTouched])].sort()
+    resolveTurn(s, { reason: e.reason, texts: s.turnTexts, changedFiles: files, error: s.turnError, costUsd: turnCost })
+  }
+  s.turnTree = undefined
   // With subagents still working the turn only handed off; their own report finishes the task.
   // A pipeline's turns are steps of it: the run says when it is done.
   if (e.reason !== 'interrupted' && !(e.reason !== 'error' && s.status.agents > 0) && !pipelineBusy.has(taskId)) {

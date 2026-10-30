@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal, PictureInPicture2, Camera, Loader2 } from 'lucide-react'
+import { ArrowUp, Square, ImagePlus, X, SlidersHorizontal, PictureInPicture2, Camera, Loader2, Workflow } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { ChatCapabilities, SlashCommandInfo } from '../../types'
 import { SessionSettings } from './SessionSettings'
@@ -25,6 +25,8 @@ interface Props {
   onFloat?: () => void
   /** Attaches a screenshot of the screen (floating window only). */
   onScreenshot?: () => Promise<{ mediaType: string; data: string } | { error: string }>
+  /** The pipeline that applies to the task, with its on/off switch; absent when there is none. */
+  pipeline?: { name: string; enabled: boolean; onToggle: () => void }
 }
 
 interface Attachment {
@@ -100,7 +102,8 @@ export function Composer({
   sessionSettings = {},
   onSessionSetting,
   onFloat,
-  onScreenshot
+  onScreenshot,
+  pipeline
 }: Props) {
   const [shooting, setShooting] = useState(false)
   const [shotError, setShotError] = useState<string | null>(null)
@@ -414,6 +417,23 @@ export function Composer({
             className="h-7 w-7 flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05] disabled:opacity-50"
           >
             {shooting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Camera className="w-3.5 h-3.5" />}
+          </button>
+        )}
+        {pipeline && (
+          <button
+            onClick={pipeline.onToggle}
+            title={
+              pipeline.enabled
+                ? `Pipeline "${pipeline.name}" runs around each message. Click to send messages straight to the agent in this task.`
+                : `Pipeline "${pipeline.name}" is off in this task. Click to turn it back on.`
+            }
+            className={cn(
+              'h-7 flex items-center gap-1.5 px-2 rounded-md text-[12px] max-w-[180px] hover:bg-white/[0.05]',
+              pipeline.enabled ? 'text-violet-300' : 'text-zinc-600 hover:text-zinc-300'
+            )}
+          >
+            <Workflow className="w-3.5 h-3.5 shrink-0" />
+            <span className={cn('truncate', !pipeline.enabled && 'line-through')}>{pipeline.name}</span>
           </button>
         )}
         {onFloat && (

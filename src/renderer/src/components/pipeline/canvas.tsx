@@ -134,8 +134,9 @@ export const ArrowEdge = memo(function ArrowEdge(props: EdgeProps<ArrowEdgeType>
         <EdgeLabelRenderer>
           <div
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            title={label}
             className={cn(
-              'absolute pointer-events-auto nodrag nopan px-1.5 py-0.5 rounded-md text-[10.5px] border bg-[#0f0f0f] whitespace-nowrap',
+              'absolute pointer-events-auto nodrag nopan px-1.5 py-0.5 rounded-md text-[10.5px] border bg-[#0f0f0f] whitespace-nowrap max-w-[180px] truncate',
               error ? 'border-red-500/50 text-red-300' : 'border-white/[0.08] text-zinc-300',
               selected && 'border-white/30'
             )}

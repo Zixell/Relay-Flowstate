@@ -92,9 +92,18 @@ export interface PipelineEdge {
 
 export type PipelineScope = { kind: 'global' } | { kind: 'task'; taskId: string }
 
+/** Limits on what one run may spend; a run that reaches one stops before its next agent turn. */
+export interface RunBudget {
+  /** Turns of agents: the anchor, prompts and agent steps. */
+  maxTurns?: number
+  /** Dollars, as the agents report them (some do not). */
+  maxCostUsd?: number
+}
+
 export interface PipelineGraph {
   nodes: PipelineNode[]
   edges: PipelineEdge[]
+  budget?: RunBudget
 }
 
 export interface Pipeline extends PipelineGraph {
@@ -116,6 +125,8 @@ export interface StepOutput {
   changedFiles?: string[]
   /** Agent session the step ran in — to open its transcript. */
   sessionId?: string
+  /** What the step's turn cost, when the agent reports it. */
+  costUsd?: number
   /** What went wrong, for an `error` step. */
   error?: string
 }
@@ -149,6 +160,7 @@ export interface ValidationIssue {
     | 'parallel-merge'
     | 'join-inputs'
     | 'node-config'
+    | 'budget'
   message: string
   nodeIds?: string[]
   edgeIds?: string[]

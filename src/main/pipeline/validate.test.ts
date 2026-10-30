@@ -98,6 +98,12 @@ describe('validate', () => {
     expect(validate(joined).issues).toEqual([])
   })
 
+  it('checks the budget', () => {
+    expect(codes({ ...graph([anchor()]), budget: { maxTurns: 0 } })).toContain('budget')
+    expect(codes({ ...graph([anchor()]), budget: { maxCostUsd: -1 } })).toContain('budget')
+    expect(validate({ ...graph([anchor()]), budget: { maxTurns: 10, maxCostUsd: 2.5 } }).ok).toBe(true)
+  })
+
   it('checks the settings a block cannot run without', () => {
     expect(issue(graph([anchor(), agent('a', 'new', ' ')], [edge('anchor', 'a')]), 'node-config')?.nodeIds).toEqual(['a'])
   })

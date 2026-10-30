@@ -53,6 +53,11 @@ export function sessionOf(node: PipelineNode): SessionTarget | null {
   }
 }
 
+/** Blocks that take an agent turn — what a run's turn budget counts. */
+export function isAgentTurn(node: PipelineNode): boolean {
+  return node.type === 'anchor' || node.type === 'prompt' || node.type === 'agent'
+}
+
 /** Conditional and default arrows go first-match among themselves; each other arrow always fires. */
 export function isRouted(edge: PipelineEdge): boolean {
   return edge.condition !== undefined || edge.isDefault === true

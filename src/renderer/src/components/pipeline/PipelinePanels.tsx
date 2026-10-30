@@ -4,6 +4,7 @@ import { useAppStore } from '../../stores/appStore'
 import type { Pipeline, PipelineGraph } from '../../../../main/pipeline/types'
 import { PipelineEditor } from './PipelineEditor'
 import { RunsView } from './RunsView'
+import { TEMPLATES } from './templates'
 import { cn } from '../../lib/utils'
 
 /** The task's Pipeline tab: the pipeline itself, and the runs it made. */
@@ -54,7 +55,7 @@ function PipelineSetup({ taskId }: { taskId: string }) {
   const [own, setOwn] = useState<Pipeline | null>(null)
   const [global, setGlobal] = useState<Pipeline | null>(null)
   /** A new pipeline being drawn, not saved yet. */
-  const [draft, setDraft] = useState<{ template?: PipelineGraph } | null>(null)
+  const [draft, setDraft] = useState<{ template?: PipelineGraph; name?: string } | null>(null)
 
   useEffect(() => {
     // The global one may have just been edited in its dialog
@@ -86,6 +87,7 @@ function PipelineSetup({ taskId }: { taskId: string }) {
         scope={{ kind: 'task', taskId }}
         pipeline={own}
         template={draft?.template}
+        templateName={draft?.name}
         onSaved={(p) => {
           setOwn(p)
           setDraft(null)
@@ -101,7 +103,7 @@ function PipelineSetup({ taskId }: { taskId: string }) {
 
   return (
     <div className="h-full flex items-center justify-center p-6">
-      <div className="max-w-md flex flex-col items-center gap-3 text-center">
+      <div className="max-w-xl flex flex-col items-center gap-3 text-center">
         <Workflow className="w-6 h-6 text-violet-300/70" />
         <p className="text-sm font-medium text-zinc-200">No pipeline for this task</p>
         <p className="text-xs text-zinc-500 leading-relaxed">
@@ -131,6 +133,19 @@ function PipelineSetup({ taskId }: { taskId: string }) {
           <button onClick={openGlobalPipeline} className="h-8 px-3 rounded-lg text-xs text-zinc-300 border border-white/[0.1] hover:bg-white/[0.05]">
             {global ? 'Edit the global pipeline' : 'Create a global pipeline'}
           </button>
+        </div>
+        <p className="pt-4 text-[11px] uppercase tracking-wide text-zinc-600">Or start from a template</p>
+        <div className="grid grid-cols-2 gap-2 w-full">
+          {TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setDraft({ template: t.graph, name: t.name })}
+              className="text-left rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2.5 hover:bg-white/[0.05] hover:border-white/[0.14]"
+            >
+              <p className="text-[12px] text-zinc-200">{t.name}</p>
+              <p className="text-[11px] text-zinc-500 leading-snug mt-1">{t.description}</p>
+            </button>
+          ))}
         </div>
       </div>
     </div>

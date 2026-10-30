@@ -2,6 +2,7 @@ import { spawn } from 'child_process'
 import type { AgentEvent, AgentSession, TurnEndReason, UserInput } from '../agents/adapter'
 import type { StepContext, StepRunner } from './engine'
 import type { AgentNode, PipelineNode, StepOutput } from './types'
+import { pathsTouchedBy } from './tree'
 
 /** How a turn ended — the task's own or a step's session. */
 export interface TurnOutcome {
@@ -10,6 +11,8 @@ export interface TurnOutcome {
   changedFiles: string[]
   error?: string
   sessionId?: string
+  /** What the turn cost, when the agent reports it. */
+  costUsd?: number
 }
 
 /** What the runner needs from the app; injected so it can be tested without agents. */
@@ -26,11 +29,13 @@ export interface RunnerDeps {
   onSideEvent(session: AgentSession, e: AgentEvent): void
   /** Called once a step's own session is done. */
   onSideClosed(session: AgentSession): void
-  /** Snapshot of the worktree; null outside git. */
-  snapshot(label: string): string | null
-  changedFiles(from: string, to: string): string[]
+  /** State of the worktree to compare against later (see tree.ts); null when it cannot be told. */
+  snapshot(label: string): unknown
+  changedFiles(before: unknown, after: unknown): string[]
   commit(message: string): StepOutput
   notify(message: string): void
+  /** A tool of a configured MCP server, called directly. */
+  callTool(server: string, tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<StepOutput>
 }
 
 const MAX_OUTPUT = 20_000
@@ -56,7 +61,7 @@ export function createRunner(deps: RunnerDeps): StepRunner {
           }
           return runShell(node.command, deps.cwd, shellEnv(ctx), signal)
         case 'tool':
-          return { status: 'error', output: '', error: 'Direct MCP tool calls are not supported yet' }
+          return deps.callTool(node.server, node.tool, node.args, signal)
         case 'join':
           return { status: 'ok', output: '' }
       }
@@ -67,7 +72,7 @@ export function createRunner(deps: RunnerDeps): StepRunner {
 function fromTurn(t: TurnOutcome, needsJson = false): StepOutput {
   const output = t.texts.at(-1) ?? ''
   const json = extractJson(t.texts)
-  const base = { output, json, changedFiles: t.changedFiles, sessionId: t.sessionId }
+  const base = { output, json, changedFiles: t.changedFiles, sessionId: t.sessionId, costUsd: t.costUsd }
   if (t.reason === 'end_turn') {
     if (needsJson && json === undefined) return { ...base, status: 'error', error: 'The answer has no JSON block' }
     return { ...base, status: 'ok' }
@@ -102,16 +107,19 @@ async function runInNewSession(deps: RunnerDeps, node: AgentNode, ctx: StepConte
   const before = deps.snapshot(`${label}-before`)
   const session = deps.openSession(node.agent ?? deps.agentId)
   const texts: string[] = []
+  const touched = new Set<string>()
   let sessionId: string | undefined
   let lastError: string | undefined
   let unsubscribe = (): void => {}
-  const ended = new Promise<Pick<TurnOutcome, 'reason' | 'error'>>((resolve) => {
+  const ended = new Promise<Pick<TurnOutcome, 'reason' | 'error' | 'costUsd'>>((resolve) => {
     unsubscribe = session.onEvent((e) => {
       deps.onSideEvent(session, e)
+      for (const p of pathsTouchedBy(e, deps.cwd)) touched.add(p)
       if (e.type === 'session.started') sessionId = e.sessionId
       else if (e.type === 'message.completed' && e.text.trim()) texts.push(e.text)
       else if (e.type === 'error') lastError = e.message
-      else if (e.type === 'turn.completed') resolve({ reason: e.reason, error: lastError })
+      // A fresh session's running total is what this step cost
+      else if (e.type === 'turn.completed') resolve({ reason: e.reason, error: lastError, costUsd: e.usage?.costUsd })
       else if (e.type === 'session.exited') resolve({ reason: 'error', error: lastError ?? 'The agent exited' })
     })
     signal.addEventListener('abort', () => resolve({ reason: 'interrupted' }), { once: true })
@@ -122,7 +130,7 @@ async function runInNewSession(deps: RunnerDeps, node: AgentNode, ctx: StepConte
     await session.send({ text: withSchema(node) })
     const end = await ended
     const after = deps.snapshot(`${label}-after`)
-    const changedFiles = before && after ? deps.changedFiles(before, after) : []
+    const changedFiles = [...new Set([...(before && after ? deps.changedFiles(before, after) : []), ...touched])].sort()
     return { ...end, texts, changedFiles, sessionId }
   } catch (err) {
     return { reason: 'error', texts, changedFiles: [], error: err instanceof Error ? err.message : String(err), sessionId }

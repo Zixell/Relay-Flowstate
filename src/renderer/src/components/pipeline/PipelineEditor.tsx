@@ -13,11 +13,12 @@ import {
   type NodeChange
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlertTriangle, Bot, Bell, GitCommitHorizontal, Merge, MessageSquareText, Save, TerminalSquare, Trash2, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Bot, Bell, ChevronDown, Gauge, GitCommitHorizontal, LayoutTemplate, Merge, MessageSquareText, Plug, Save, TerminalSquare, Trash2, X, XCircle } from 'lucide-react'
+import { TEMPLATES, type PipelineTemplate } from './templates'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import { validate } from '../../../../main/pipeline/validate'
-import type { Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelineScope, ValidationIssue } from '../../../../main/pipeline/types'
+import type { Pipeline, PipelineEdge, PipelineGraph, PipelineNode, PipelineScope, RunBudget, ValidationIssue } from '../../../../main/pipeline/types'
 import { ArrowEdgeType, BlockNodeType, MarksContext, edgeTypes, nodeTypes, type Marks } from './canvas'
 import { EdgeInspector, NodeInspector } from './Inspector'
 import { emptyGraph, freeId, layout, newBlock, renameBlock, type BlockKind } from './model'
@@ -25,6 +26,7 @@ import { emptyGraph, freeId, layout, newBlock, renameBlock, type BlockKind } fro
 const PALETTE: { kind: BlockKind; label: string; hint: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { kind: 'agent', label: 'Agent step', hint: 'A prompt for an agent — in the chat session or a new one', icon: Bot },
   { kind: 'prompt', label: 'Prompt', hint: 'A message sent to the chat agent', icon: MessageSquareText },
+  { kind: 'tool', label: 'Tool call', hint: 'Call a tool of an MCP server directly, without an agent', icon: Plug },
   { kind: 'commit', label: 'Commit', hint: 'Commit every change in the worktree', icon: GitCommitHorizontal },
   { kind: 'shell', label: 'Shell command', hint: 'Run a command in the worktree', icon: TerminalSquare },
   { kind: 'notify', label: 'Notify', hint: 'Show a system notification', icon: Bell },
@@ -53,6 +55,8 @@ export interface PipelineEditorProps {
   /** The saved pipeline, or null to start a new one (optionally from `template`). */
   pipeline: Pipeline | null
   template?: PipelineGraph
+  /** Name of a new pipeline started from a template. */
+  templateName?: string
   onSaved?: (p: Pipeline) => void
   onDeleted?: () => void
   onClose?: () => void
@@ -66,21 +70,25 @@ export function PipelineEditor(props: PipelineEditorProps) {
   )
 }
 
-function Editor({ scope, pipeline, template, onSaved, onDeleted, onClose }: PipelineEditorProps) {
+function Editor({ scope, pipeline, template, templateName, onSaved, onDeleted, onClose }: PipelineEditorProps) {
   const agents = useAppStore((s) => s.agents)
   const flow = useReactFlow()
   const start = useMemo(() => layout(pipeline ?? template ?? emptyGraph()), [pipeline, template])
   const [nodes, setNodes] = useState<BlockNodeType[]>(() => start.nodes.map(toNode))
   const [edges, setEdges] = useState<ArrowEdgeType[]>(() => start.edges.map(toEdge))
   const [id] = useState(() => pipeline?.id ?? crypto.randomUUID())
-  const [name, setName] = useState(pipeline?.name ?? (scope.kind === 'global' ? 'Global pipeline' : 'Task pipeline'))
+  const defaultName = scope.kind === 'global' ? 'Global pipeline' : 'Task pipeline'
+  const [name, setName] = useState(pipeline?.name ?? templateName ?? defaultName)
+  const [budget, setBudget] = useState<RunBudget | undefined>(pipeline?.budget ?? template?.budget)
+  const [budgetOpen, setBudgetOpen] = useState(false)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
   const [dirty, setDirty] = useState(!pipeline)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   const graph = useMemo<PipelineGraph>(
-    () => ({ nodes: nodes.map((n) => ({ ...n.data.block, position: n.position })), edges: edges.map((e) => e.data!.edge) }),
-    [nodes, edges]
+    () => ({ nodes: nodes.map((n) => ({ ...n.data.block, position: n.position })), edges: edges.map((e) => e.data!.edge), budget }),
+    [nodes, edges, budget]
   )
   const { issues, analysis } = useMemo(() => validate(graph), [graph])
   const errors = issues.filter((i) => i.level === 'error')
@@ -166,6 +174,18 @@ function Editor({ scope, pipeline, template, onSaved, onDeleted, onClose }: Pipe
     touch()
   }
 
+  const applyTemplate = (t: PipelineTemplate): void => {
+    setTemplatesOpen(false)
+    if (nodes.length > 1 && !window.confirm(`Replace the blocks on the canvas with "${t.name}"?`)) return
+    const g = layout(t.graph)
+    setNodes(g.nodes.map(toNode))
+    setBudget(t.graph.budget)
+    setEdges(g.edges.map(toEdge))
+    if (name === defaultName || TEMPLATES.some((x) => x.name === name)) setName(t.name)
+    touch()
+    requestAnimationFrame(() => void flow.fitView({ padding: 0.3, maxZoom: 1, duration: 300 }))
+  }
+
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
@@ -209,6 +229,54 @@ function Editor({ scope, pipeline, template, onSaved, onDeleted, onClose }: Pipe
             {saveError && <span className="text-[11px] text-red-300 truncate max-w-[320px]">{saveError}</span>}
             {!saveError && errors.length > 0 && <span className="text-[11px] text-red-300/80">Fix {errors.length} problem{errors.length > 1 ? 's' : ''} to save</span>}
             {!saveError && !errors.length && dirty && <span className="text-[11px] text-zinc-500">Unsaved changes</span>}
+            <div className="relative">
+              <button
+                onClick={() => setBudgetOpen((o) => !o)}
+                title="Limits on what one run may spend"
+                className={cn(
+                  'flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs hover:bg-white/[0.06]',
+                  budget?.maxTurns || budget?.maxCostUsd ? 'text-zinc-300' : 'text-amber-300/80'
+                )}
+              >
+                <Gauge className="w-3.5 h-3.5" />
+                {budgetLabel(budget)}
+              </button>
+              {budgetOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setBudgetOpen(false)} />
+                  <BudgetPopover
+                    budget={budget}
+                    onChange={(b) => {
+                      setBudget(b)
+                      touch()
+                    }}
+                  />
+                </>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                onClick={() => setTemplatesOpen((o) => !o)}
+                className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs text-zinc-300 hover:bg-white/[0.06]"
+              >
+                <LayoutTemplate className="w-3.5 h-3.5" />
+                Templates
+                <ChevronDown className="w-3 h-3 text-zinc-500" />
+              </button>
+              {templatesOpen && (
+                <>
+                  <div className="fixed inset-0 z-20" onClick={() => setTemplatesOpen(false)} />
+                  <div className="absolute right-0 top-9 z-30 w-80 rounded-xl border border-white/[0.1] bg-[#141414] shadow-2xl p-1.5">
+                    {TEMPLATES.map((t) => (
+                      <button key={t.id} onClick={() => applyTemplate(t)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/[0.05]">
+                        <p className="text-[12.5px] text-zinc-100">{t.name}</p>
+                        <p className="text-[11px] text-zinc-500 leading-snug mt-0.5">{t.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
             {pipeline && (
               <button onClick={remove} title="Delete the pipeline" className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs text-zinc-400 hover:text-red-300 hover:bg-red-500/10">
                 <Trash2 className="w-3.5 h-3.5" />
@@ -282,6 +350,7 @@ function Editor({ scope, pipeline, template, onSaved, onDeleted, onClose }: Pipe
                 node={selectedNode.data.block}
                 agents={agents}
                 ids={nodes.map((n) => n.id).filter((x) => x !== selectedNode.id)}
+                mcpTaskId={scope.kind === 'task' ? scope.taskId : null}
                 onChange={updateBlock}
                 onRename={(to) => rename(selectedNode.id, to)}
                 onDelete={() => void flow.deleteElements({ nodes: [{ id: selectedNode.id }] })}
@@ -327,6 +396,61 @@ function IssueList({ issues, onPick }: { issues: ValidationIssue[]; onPick: (t: 
           <span className={cn(i.level === 'error' ? 'text-red-200/90' : 'text-amber-200/80')}>{i.message}</span>
         </button>
       ))}
+    </div>
+  )
+}
+
+function budgetLabel(b?: RunBudget): string {
+  const parts = [b?.maxTurns ? `${b.maxTurns} turns` : null, b?.maxCostUsd ? `$${b.maxCostUsd}` : null].filter(Boolean)
+  return parts.length ? `Budget: ${parts.join(' · ')}` : 'No budget'
+}
+
+/** Per-run limits; empty fields mean no limit. */
+function BudgetPopover({ budget, onChange }: { budget?: RunBudget; onChange: (b: RunBudget | undefined) => void }) {
+  const set = (patch: RunBudget): void => {
+    const next = { ...budget, ...patch }
+    if (!next.maxTurns) delete next.maxTurns
+    if (!next.maxCostUsd) delete next.maxCostUsd
+    onChange(Object.keys(next).length ? next : undefined)
+  }
+  const input = 'w-24 rounded-md border border-white/[0.08] bg-black/30 px-2.5 py-1.5 text-[12px] text-zinc-200 focus:outline-none focus:border-white/25'
+  return (
+    <div className="absolute right-0 top-9 z-30 w-80 rounded-xl border border-white/[0.1] bg-[#141414] shadow-2xl p-4 flex flex-col gap-3">
+      <div>
+        <p className="text-[12.5px] text-zinc-100">Budget per run</p>
+        <p className="text-[11px] text-zinc-500 leading-snug mt-1">
+          A run that reaches a limit stops before its next agent turn. Loops have their own limits; this caps the whole run, parallel branches included.
+        </p>
+      </div>
+      <label className="flex items-center justify-between gap-3 text-[12px] text-zinc-300">
+        <span>
+          Agent turns
+          <span className="block text-[10.5px] text-zinc-600">Input prompt, prompts and agent steps</span>
+        </span>
+        <input
+          type="number"
+          min={1}
+          value={budget?.maxTurns ?? ''}
+          placeholder="no limit"
+          onChange={(e) => set({ maxTurns: e.target.value ? Math.max(1, Math.floor(Number(e.target.value))) : undefined })}
+          className={input}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-3 text-[12px] text-zinc-300">
+        <span>
+          Cost, $
+          <span className="block text-[10.5px] text-zinc-600">As agents report it — Codex on a ChatGPT plan does not</span>
+        </span>
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          value={budget?.maxCostUsd ?? ''}
+          placeholder="no limit"
+          onChange={(e) => set({ maxCostUsd: e.target.value ? Number(e.target.value) : undefined })}
+          className={input}
+        />
+      </label>
     </div>
   )
 }

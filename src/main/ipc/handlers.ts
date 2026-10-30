@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
+import { homedir } from 'os'
 import {
   getAllProjects,
   getAllTasks,
@@ -35,9 +36,10 @@ import {
 import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
 import { getMessages, getTurns, getTurn, getPipelineRun, getPipelineRuns, getPipelineSteps, type MessageRow } from '../db'
-import { activeRunId, cancelRun, submitMessage } from '../pipeline/service'
-import { loadPipeline, removePipeline, stepTranscript, storePipeline } from '../pipeline/store'
+import { activeRunId, cancelRun, pipelineEnabled, setPipelineEnabled, submitMessage } from '../pipeline/service'
+import { loadPipeline, pipelineForTask, removePipeline, stepTranscript, storePipeline } from '../pipeline/store'
 import { validate } from '../pipeline/validate'
+import { listMcpServers, listMcpTools } from '../pipeline/mcp'
 import type { Pipeline, PipelineGraph } from '../pipeline/types'
 import { deleteSnapshots, diffSnapshotFiles, diffSnapshots, restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
 import {
@@ -92,6 +94,12 @@ function taskSourceBranch(task: { project_path: string; branch?: string | null; 
 
 function emitTaskEvent(event: { id: string; task_id: string; type: string; content: string; metadata: string | null; timestamp?: number }): void {
   broadcast(`tasks:event:${event.task_id}`, event)
+}
+
+/** The project and working directory a task's pipeline runs in. */
+function pipelineProject(taskId: string | null): { projectPath: string; cwd: string } | undefined {
+  const task = taskId ? (getTaskById(taskId) as { project_path: string; worktree_path?: string | null } | null) : null
+  return task ? { projectPath: task.project_path, cwd: task.worktree_path || task.project_path } : undefined
 }
 
 export function registerIpcHandlers(): void {
@@ -338,6 +346,18 @@ export function registerIpcHandlers(): void {
     return run ? { run, steps: getPipelineSteps(run.id) } : null
   })
   ipcMain.handle('pipeline:runs', (_, taskId: string) => getPipelineRuns(taskId))
+  // What the chat's pipeline switch shows: the pipeline that applies to the task, and whether it is on
+  ipcMain.handle('pipeline:forTask', (_, taskId: string) => {
+    const p = pipelineForTask(taskId)
+    return p ? { name: p.name, scope: p.scope.kind, enabled: pipelineEnabled(taskId), budget: p.budget ?? null } : null
+  })
+  ipcMain.handle('pipeline:setEnabled', (_, { taskId, enabled }: { taskId: string; enabled: boolean }) => setPipelineEnabled(taskId, enabled))
+  // MCP servers a Tool block can call: for the global pipeline only the user's own, for a task also its project's
+  ipcMain.handle('pipeline:mcpServers', (_, taskId: string | null) => listMcpServers(pipelineProject(taskId)?.projectPath))
+  ipcMain.handle('pipeline:mcpTools', (_, { taskId, server }: { taskId: string | null; server: string }) => {
+    const where = pipelineProject(taskId)
+    return listMcpTools(server, { projectPath: where?.projectPath, cwd: where?.cwd ?? homedir() })
+  })
   ipcMain.handle('pipeline:transcript', (_, stepId: string) => stepTranscript(stepId))
   ipcMain.handle('pipeline:active', (_, taskId: string) => activeRunId(taskId))
   ipcMain.handle('pipeline:cancel', (_, taskId: string) => cancelRun(taskId))

@@ -5,7 +5,7 @@ graph: blocks connected by arrows, conditions on arrows, parallel branches and
 bounded loops. Example: agent writes code → independent review → commit on
 pass, "fix the remarks" on fail, at most 3 rounds.
 
-Status: phases 1–4 done (engine, chat wiring with a progress strip, editor, run view) — code in `src/main/pipeline/` and `src/renderer/src/components/pipeline/`.
+Status: all phases done (engine, chat wiring with a progress strip, editor, run view, MCP tool calls and combined conditions, templates) — code in `src/main/pipeline/` and `src/renderer/src/components/pipeline/`.
 
 ## Concepts
 
@@ -109,7 +109,15 @@ they will get values through environment variables.
   files get a warning (shared worktree).
 - A permission prompt inside a block pauses the run; task status → waiting.
 - A user message during a run is queued; "Stop pipeline" cancels the run.
-- Optional per-run budget (turns / cost), checked against account limits.
+- Per-run budget (`graph.budget`): `maxTurns` counts agent turns (anchor,
+  prompts, agent steps), `maxCostUsd` sums the cost agents report (a turn in the
+  chat session costs the growth of the session's running total; a new-session
+  step its session's total). Checked before each agent turn — a run that reached
+  a limit fails with "Budget reached: …". Set in the editor's Budget popover;
+  templates come with a turn budget. The progress strip shows "3/10 turns · $0.42".
+- Switch in the composer: the pipeline that applies to the task, by name; a click
+  turns it off for this task (`pipelineOff` in the task's metadata) so messages go
+  straight to the agent, another click turns it back on.
 
 ## Block types (v1)
 
@@ -186,8 +194,10 @@ survives a restart; a run that was going when the app quit is marked
       new-session runner; recursion guard; run card in chat
 - [x] 3. Editor on React Flow with live validation; task and global pipelines
 - [x] 4. Run view with per-block output
-- [ ] 5. Tool call block (direct MCP), structured output conditions, templates
-- [ ] 6. Built-in templates: "Review → Commit / Fix", "Push ∥ Update docs"
+- [x] 5. Tool call block (direct MCP), structured output conditions, templates
+- [x] 6. Built-in templates (`templates.ts`): Review → Commit / Fix, Commit → Push & Update docs,
+      Tests gate, Refine the prompt first — offered in the empty Pipeline tab and the
+      editor's Templates menu; each is checked by the validator in tests
 
 ## Code map (phase 1)
 
@@ -215,6 +225,10 @@ survives a restart; a run that was going when the app quit is marked
   turn, snapshot the worktree before/after for changed files, then dispose.
   Their permission prompts are shown in the task chat (they need an answer) and
   answered through the usual `chat:permission`; everything else stays in the run.
+- Changed files of a step (`changedFiles`, the "files changed" condition): git
+  snapshots in a repository; outside git a scan of sizes and modification times
+  before and after (heavy dirs like `node_modules` skipped, up to 50k files) —
+  both plus the files the agent's finished edits report (`tree.ts`).
 - A step with `outputSchema` is asked to end with a ```json block; without one
   the step fails. Any step's last ```json block (or an all-JSON answer) is parsed
   into `json`.
@@ -230,7 +244,6 @@ survives a restart; a run that was going when the app quit is marked
   the task's latest run; a new run takes it over.
 - A Notify block shows an in-app notice while the app is in front (macOS hides
   banners of the front app) and a system notification otherwise.
-- Tool call blocks fail with "not supported yet" until phase 5.
 
 ## Editor (phase 3)
 
@@ -249,6 +262,25 @@ survives a restart; a run that was going when the app quit is marked
   success, changed files), order, and for loops the limit and what happens after.
   Renaming a block id updates arrows, loop exits and templates.
 - Combined conditions (`all`/`any`/`not`) run but are not editable in the UI yet.
+
+## MCP tool calls and conditions (phase 5)
+
+- Tool blocks call an MCP tool directly (`mcp.ts`, official SDK client): stdio,
+  streamable HTTP or SSE. Servers are the user's Claude Code ones — user scope and
+  this project's local scope in `~/.claude.json`, and the project's `.mcp.json`
+  (project wins); `${VAR}` / `${VAR:-default}` are expanded. Servers that need
+  OAuth (claude.ai connectors) are not supported.
+- The global pipeline's editor lists user-scope servers only; at run time the
+  task's project servers resolve too.
+- A connection per call: start, list tools (for the schema), call, close.
+  Argument texts are filled from templates and converted to the schema's types
+  (numbers, booleans, JSON); empty optional ones are left out. Text content is the
+  output; `structuredContent`, or text that is JSON, is `json`; `isError` fails
+  the block.
+- The inspector lists servers, starts one to list its tools, and shows a field
+  per argument from the tool's schema.
+- Conditions in the editor: one check, or all / any of several, each negatable.
+  Deeper nesting is evaluated but only summarized in the editor.
 
 ## Decisions
 

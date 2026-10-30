@@ -149,6 +149,12 @@ export function validate(graph: PipelineGraph): ValidationResult {
     }
   }
 
+  const { maxTurns, maxCostUsd } = graph.budget ?? {}
+  if (maxTurns !== undefined && !(Number.isInteger(maxTurns) && maxTurns >= 1)) {
+    error({ code: 'budget', message: 'The turn budget must be a whole number of at least 1' })
+  }
+  if (maxCostUsd !== undefined && !(maxCostUsd > 0)) error({ code: 'budget', message: 'The cost budget must be above zero' })
+
   return { ok: !issues.some((i) => i.level === 'error'), issues, analysis: a }
 }
 

@@ -2,9 +2,9 @@ import { BrowserWindow, Notification } from 'electron'
 import { randomUUID } from 'crypto'
 import type { UserInput } from '../agents/adapter'
 import { getAgent } from '../agents'
-import { getTaskById, insertMessage, type MessageRow } from '../db'
+import { getTaskById, insertMessage, updateTaskMetadata, type MessageRow } from '../db'
 import { commitStaged, getCurrentCommit, getWorkingDirStatus, stageFiles } from '../git'
-import { diffSnapshotFiles, snapshotWorkingTree } from '../git/snapshots'
+import { captureTree, changedBetween, type TreeState } from './tree'
 import { getSetting } from '../settings'
 import { showTaskInMain } from '../windows'
 import { cancelResume } from '../session/auto-resume'
@@ -19,6 +19,7 @@ import {
 } from '../session/manager'
 import { PipelineRun, type RunEvent } from './engine'
 import { createRunner } from './runner'
+import { callMcpTool } from './mcp'
 import { pipelineForTask, recordRun } from './store'
 import type { Pipeline, RunStatus, StepOutput } from './types'
 
@@ -60,7 +61,7 @@ export async function submitMessage(taskId: string, input: UserInput): Promise<M
     return message
   }
   const pipeline = pipelineForTask(taskId)
-  if (!pipeline) return sendMessage(taskId, input)
+  if (!pipeline || !pipelineEnabled(taskId)) return sendMessage(taskId, input)
   cancelResume(taskId)
   const message = recordUserMessage(taskId, input)
   start(taskId, pipeline, input, message)
@@ -73,6 +74,27 @@ export function cancelRun(taskId: string): void {
   if (!running) return
   running.queue = []
   running.run.cancel()
+}
+
+/** Whether the task's messages go through its pipeline; switched off from the chat. */
+export function pipelineEnabled(taskId: string): boolean {
+  return readMeta(taskId).pipelineOff !== true
+}
+
+export function setPipelineEnabled(taskId: string, enabled: boolean): void {
+  const meta = readMeta(taskId)
+  if (enabled) delete meta.pipelineOff
+  else meta.pipelineOff = true
+  updateTaskMetadata(taskId, meta)
+  send('task:metadata', { taskId, metadata: JSON.stringify(meta) })
+}
+
+function readMeta(taskId: string): Record<string, unknown> {
+  try {
+    return JSON.parse((getTaskById(taskId) as { metadata?: string | null } | null)?.metadata ?? '{}') as Record<string, unknown>
+  } catch {
+    return {}
+  }
 }
 
 export function activeRunId(taskId: string): string | null {
@@ -105,10 +127,11 @@ function start(taskId: string, pipeline: Pipeline, input: UserInput, message: Me
           if (e.type === 'permission.requested' || e.type === 'permission.resolved') showSidePermission(taskId, session, e)
         },
         onSideClosed: (session) => expireSidePermissions(taskId, session),
-        snapshot: (label) => snapshotWorkingTree(cwd, taskId, label),
-        changedFiles: (from, to) => diffSnapshotFiles(cwd, from, to).map((f) => f.path),
+        snapshot: (label) => captureTree(cwd, taskId, label),
+        changedFiles: (before, after) => changedBetween(cwd, before as TreeState, after as TreeState),
         commit: (msg) => commitAll(cwd, msg),
-        notify: (msg) => notify(taskId, task.title, msg)
+        notify: (msg) => notify(taskId, task.title, msg),
+        callTool: (server, tool, args, signal) => callMcpTool(server, tool, args, { projectPath: task.project_path, cwd, signal })
       }),
       onEvent: (e) => {
         record?.(e)

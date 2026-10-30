@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Pipeline, PipelineGraph, PipelineRunRow, PipelineStepRow, RunEvent, TranscriptItem, ValidationIssue } from '../main/pipeline/types'
+import type { Pipeline, PipelineGraph, PipelineRunRow, PipelineStepRow, RunBudget, RunEvent, TranscriptItem, ValidationIssue } from '../main/pipeline/types'
 
 /** Where an app update stands (see main/updater.ts). */
 interface UpdateState {
@@ -195,10 +195,24 @@ const api = {
     delete: (taskId: string | null) => ipcRenderer.invoke('pipeline:delete', taskId),
     validate: (graph: PipelineGraph): Promise<ValidationIssue[]> => ipcRenderer.invoke('pipeline:validate', graph),
     run: (runId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:run', runId),
+    /** The pipeline that applies to the task (its own or the global one), and whether the chat switched it off. */
+    forTask: (taskId: string): Promise<{ name: string; scope: 'task' | 'global'; enabled: boolean; budget: RunBudget | null } | null> =>
+      ipcRenderer.invoke('pipeline:forTask', taskId),
+    /** Switches the pipeline off (or back on) for this task's messages. */
+    setEnabled: (taskId: string, enabled: boolean) => ipcRenderer.invoke('pipeline:setEnabled', { taskId, enabled }),
     /** The task's runs, newest first. */
     runs: (taskId: string): Promise<PipelineRunRow[]> => ipcRenderer.invoke('pipeline:runs', taskId),
     /** What a step that ran in its own session said and did. */
     transcript: (stepId: string): Promise<TranscriptItem[]> => ipcRenderer.invoke('pipeline:transcript', stepId),
+    /** MCP servers a Tool block can call (the user's own, plus the task project's). */
+    mcpServers: (taskId: string | null): Promise<{ name: string; scope: 'user' | 'local' | 'project'; transport: string }[]> =>
+      ipcRenderer.invoke('pipeline:mcpServers', taskId),
+    /** Starts the server and lists its tools. */
+    mcpTools: (
+      taskId: string | null,
+      server: string
+    ): Promise<{ name: string; description?: string; inputSchema: { properties?: Record<string, { type?: string | string[]; description?: string }>; required?: string[] } }[]> =>
+      ipcRenderer.invoke('pipeline:mcpTools', { taskId, server }),
     /** The task's most recent run. */
     latest: (taskId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:latest', taskId),
     /** A Notify block fired while the app is in front. */

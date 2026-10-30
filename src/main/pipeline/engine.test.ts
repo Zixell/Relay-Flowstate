@@ -269,6 +269,29 @@ describe('PipelineRun', () => {
     expect(log).toEqual(['anchor', 'long'])
   })
 
+  it('stops before the agent turn that would go over the turn budget', async () => {
+    const g = { ...reviewLoop(5), budget: { maxTurns: 4 } }
+    const { result, log } = run(g, { review: () => json({ verdict: 'fail' }) })
+    expect(await result).toMatchObject({ status: 'failed', error: 'Budget reached: 4 agent turns' })
+    // anchor, review, fix, review — the next fix would be the fifth turn
+    expect(log).toEqual(['anchor', 'review', 'fix', 'review'])
+  })
+
+  it('stops once the reported cost reaches the budget', async () => {
+    const g = { ...reviewLoop(5), budget: { maxCostUsd: 1 } }
+    const { result, log } = run(g, { review: () => ({ ...json({ verdict: 'fail' }), costUsd: 0.4 }) })
+    expect(await result).toMatchObject({ status: 'failed', error: 'Budget reached: $1.20 of $1.00' })
+    expect(log.filter((n) => n === 'review')).toHaveLength(3)
+  })
+
+  it('does not count blocks that take no agent turn', async () => {
+    const g = graph(
+      [anchor(), { id: 'sh', type: 'action', action: 'shell', command: 'true' }, { id: 'bell', type: 'action', action: 'notify', message: 'x' }],
+      [edge('anchor', 'sh'), edge('sh', 'bell')]
+    )
+    expect((await run({ ...g, budget: { maxTurns: 1 } }).result).status).toBe('completed')
+  })
+
   it('reports the run through events', async () => {
     const { result, events } = run(graph([anchor()]))
     await result

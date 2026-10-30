@@ -581,6 +581,17 @@ export function ChatView({ task, compact }: Props) {
     !(handoff && turn.started_at < handoff.at) &&
     (Boolean(capabilities?.forkFromTurn && turn.checkpoint) || turn.id === lastTurnId)
 
+  // The pipeline that applies here and its switch; re-read when the task's metadata or the global pipeline changes
+  const [pipelineInfo, setPipelineInfo] = useState<{ name: string; enabled: boolean } | null>(null)
+  const globalPipelineOpen = useAppStore((s) => s.isGlobalPipelineOpen)
+  const refreshPipeline = useCallback(() => {
+    if (!window.api?.pipelines) return
+    void window.api.pipelines.forTask(task.id).then(setPipelineInfo)
+  }, [task.id])
+  useEffect(() => {
+    if (!globalPipelineOpen) refreshPipeline()
+  }, [refreshPipeline, task.metadata, globalPipelineOpen])
+
   const lastError = useMemo(() => {
     const last = state.messages[state.messages.length - 1]
     return last?.kind === 'error' ? last.content : null
@@ -744,6 +755,15 @@ export function ChatView({ task, compact }: Props) {
             onSessionSetting={(key, value) => void window.api.chat.setSessionSetting(task.id, key, value)}
             onFloat={compact || !window.api?.pip ? undefined : () => void window.api.pip.open(task.id)}
             onScreenshot={compact && window.api?.pip ? () => window.api.pip.screenshot() : undefined}
+            pipeline={
+              pipelineInfo
+                ? {
+                    name: pipelineInfo.name,
+                    enabled: pipelineInfo.enabled,
+                    onToggle: () => void window.api.pipelines.setEnabled(task.id, !pipelineInfo.enabled).then(refreshPipeline)
+                  }
+                : undefined
+            }
           />
           <UsageBar usage={state.usage} costUsd={state.costUsd} />
         </div>
