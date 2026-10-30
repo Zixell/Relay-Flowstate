@@ -49,6 +49,14 @@ export function useChat(taskId: string): ChatHandle {
       }
     })
 
+    // A run can end without a turn in the chat (e.g. a condition skipped it): settle the composer
+    const unsubRuns = window.api.pipelines.onEvent(taskId, (e) => {
+      if (e.type !== 'run.completed') return
+      void window.api.chat.live(taskId).then((l: { inTurn?: boolean }) => {
+        if (!cancelled) setState((s) => ({ ...s, inTurn: Boolean(l.inTurn) }))
+      })
+    })
+
     Promise.all([
       window.api.chat.history(taskId) as Promise<ChatMessage[]>,
       window.api.chat.live(taskId) as Promise<{
@@ -97,6 +105,7 @@ export function useChat(taskId: string): ChatHandle {
     return () => {
       cancelled = true
       unsub()
+      unsubRuns()
     }
   }, [taskId, refreshTurns])
 

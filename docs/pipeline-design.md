@@ -5,7 +5,7 @@ graph: blocks connected by arrows, conditions on arrows, parallel branches and
 bounded loops. Example: agent writes code → independent review → commit on
 pass, "fix the remarks" on fail, at most 3 rounds.
 
-Status: phase 1 (engine, no UI) done — code in `src/main/pipeline/`.
+Status: phases 1–2 done (engine, wired to chat sessions, run card in the chat); no editor yet — code in `src/main/pipeline/`.
 
 ## Concepts
 
@@ -180,7 +180,7 @@ survives a restart; a run that was going when the app quit is marked
 - [x] 1. Engine without UI: model, validator, token executor, persistence; graphs
       defined in JSON; unit tests on semantics (parallel, first-match, loops, Join
       with dead paths)
-- [ ] 2. Agent step / Static prompt / Action blocks wired to SessionManager;
+- [x] 2. Agent step / Static prompt / Action blocks wired to SessionManager;
       new-session runner; recursion guard; run card in chat
 - [ ] 3. Editor on React Flow with live validation; task and global pipelines
 - [ ] 4. Run view with per-block output
@@ -198,6 +198,31 @@ survives a restart; a run that was going when the app quit is marked
 | `src/main/pipeline/template.ts` | `{{…}}` rendering |
 | `src/main/pipeline/engine.ts` | `PipelineRun` — token executor over a `StepRunner` |
 | `src/main/pipeline/store.ts` | Load/save pipelines, record runs (`src/main/db`) |
+
+## Wiring (phase 2)
+
+- `chat:send` and the first prompt of a new task go through `submitMessage`
+  (`service.ts`): no pipeline → straight to the agent as before; otherwise the
+  message is shown, a run starts and a `pipeline` card is put into the chat.
+- Steps on the `current` session use `runTurn` (`session/manager.ts`): waits out
+  a turn already going, sends, resolves on `turn.completed` with the turn's texts
+  and changed files. Prompt blocks and current-session agent steps appear in the
+  chat as `pipeline_prompt` messages ("Sent by the pipeline"); the anchor sends
+  the rendered prompt but the chat shows what the user typed.
+- `new`-session steps open their own adapter session in the worktree, run one
+  turn, snapshot the worktree before/after for changed files, then dispose.
+  Their permission prompts are shown in the task chat (they need an answer) and
+  answered through the usual `chat:permission`; everything else stays in the run.
+- A step with `outputSchema` is asked to end with a ```json block; without one
+  the step fails. Any step's last ```json block (or an all-JSON answer) is parsed
+  into `json`.
+- Shell actions get earlier outputs as `PIPELINE_INPUT`,
+  `PIPELINE_<BLOCK>_OUTPUT`, `_STATUS`, `_JSON`; a non-zero exit fails the step.
+- A user message during a run is shown and queued; each queued message starts the
+  next run. Stop in the chat (or on the card) cancels the run and the queue.
+- While a run goes the task shows `running`; per-turn "finished" notifications are
+  held back and one comes when the run ends.
+- Tool call blocks fail with "not supported yet" until phase 5.
 
 ## Decisions
 

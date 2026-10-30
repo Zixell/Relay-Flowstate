@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { join } from 'path'
+import type { PipelineRunRow, PipelineStepRow } from '../pipeline/types'
 
 let db: Database.Database | null = null
 
@@ -506,7 +507,8 @@ export function resetRunningTurns(): void {
 
 // --- Chat: messages ---
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
-export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff'
+/** `pipeline` is a pipeline run's card (content `{ runId }`); `pipeline_prompt` a message a pipeline sent to the session. */
+export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff' | 'pipeline' | 'pipeline_prompt'
 
 export interface MessageRow {
   id: string
@@ -610,6 +612,8 @@ export function updateTaskChatSettings(id: string, fields: { model?: string; mod
 }
 
 // --- Pipelines ---
+export type { PipelineRunRow, PipelineStepRow }
+
 export interface PipelineRow {
   id: string
   /** Null for the global pipeline. */
@@ -638,32 +642,6 @@ export function savePipeline(row: { id: string; task_id: string | null; name: st
 export function deletePipeline(taskId: string | null): void {
   if (!db) return
   db.prepare('DELETE FROM pipelines WHERE task_id IS ?').run(taskId)
-}
-
-export interface PipelineRunRow {
-  id: string
-  task_id: string
-  pipeline_id: string | null
-  message_id: string | null
-  input: string
-  /** The graph as it was when the run started — the pipeline may have been edited since. */
-  graph_json: string
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
-  error: string | null
-  started_at: number
-  completed_at: number | null
-}
-
-export interface PipelineStepRow {
-  id: string
-  run_id: string
-  node_id: string
-  activation: number
-  status: 'running' | 'ok' | 'error' | 'cancelled'
-  /** JSON of the step's `StepOutput`. */
-  output_json: string | null
-  started_at: number
-  completed_at: number | null
 }
 
 export function insertPipelineRun(run: {
@@ -706,6 +684,11 @@ export function getPipelineRuns(taskId: string, limit = 50): PipelineRunRow[] {
   return db
     .prepare('SELECT * FROM pipeline_runs WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?')
     .all(taskId, limit) as PipelineRunRow[]
+}
+
+export function getPipelineRun(id: string): PipelineRunRow | undefined {
+  if (!db) return undefined
+  return db.prepare('SELECT * FROM pipeline_runs WHERE id = ?').get(id) as PipelineRunRow | undefined
 }
 
 export function getPipelineSteps(runId: string): PipelineStepRow[] {

@@ -34,10 +34,13 @@ import {
 } from '../git'
 import { addWorktree, removeWorktree, checkWorktreeSupport } from '../git/worktree'
 import { setSetting, getSettingForClient } from '../settings'
-import { getMessages, getTurns, getTurn, type MessageRow } from '../db'
+import { getMessages, getTurns, getTurn, getPipelineRun, getPipelineSteps, type MessageRow } from '../db'
+import { activeRunId, cancelRun, submitMessage } from '../pipeline/service'
+import { loadPipeline, removePipeline, storePipeline } from '../pipeline/store'
+import { validate } from '../pipeline/validate'
+import type { Pipeline, PipelineGraph } from '../pipeline/types'
 import { deleteSnapshots, diffSnapshotFiles, diffSnapshots, restoreSnapshot, snapshotWorkingTree } from '../git/snapshots'
 import {
-  sendMessage,
   interrupt as interruptChat,
   respondPermission,
   setMode as setChatMode,
@@ -190,7 +193,7 @@ export function registerIpcHandlers(): void {
         })
       }
 
-      sendMessage(id, { text: prompt }).catch((err) => {
+      submitMessage(id, { text: prompt }).catch((err) => {
         console.error('[relay] chat session failed to start:', err)
         updateTaskStatus(id, 'failed')
         broadcast('task:status', { taskId: id, status: 'failed' })
@@ -280,9 +283,13 @@ export function registerIpcHandlers(): void {
       insertTaskEvent(event)
       emitTaskEvent({ ...event, metadata: null, timestamp: Math.floor(Date.now() / 1000) })
     }
-    return sendMessage(taskId, input)
+    return submitMessage(taskId, input)
   })
-  ipcMain.handle('chat:interrupt', (_, taskId: string) => interruptChat(taskId))
+  // Stopping the chat stops the pipeline it belongs to as well
+  ipcMain.handle('chat:interrupt', (_, taskId: string) => {
+    cancelRun(taskId)
+    return interruptChat(taskId)
+  })
   ipcMain.handle('chat:cancelResume', (_, taskId: string) => cancelResume(taskId))
   ipcMain.handle('chat:moveToBackground', (_, { taskId, toolCallId }: { taskId: string; toolCallId: string }) =>
     moveToBackground(taskId, toolCallId)
@@ -316,6 +323,18 @@ export function registerIpcHandlers(): void {
     return task ? suggestFiles(task.worktree_path || task.project_path, query) : []
   })
   ipcMain.handle('chat:attachment', (_, { taskId, id }: { taskId: string; id: string }) => readAttachment(taskId, id))
+
+  // --- Pipelines (docs/pipeline-design.md); taskId null is the global pipeline ---
+  ipcMain.handle('pipeline:get', (_, taskId: string | null) => loadPipeline(taskId) ?? null)
+  ipcMain.handle('pipeline:save', (_, pipeline: Pipeline) => storePipeline(pipeline))
+  ipcMain.handle('pipeline:delete', (_, taskId: string | null) => removePipeline(taskId))
+  ipcMain.handle('pipeline:validate', (_, graph: PipelineGraph) => validate(graph).issues)
+  ipcMain.handle('pipeline:run', (_, runId: string) => {
+    const run = getPipelineRun(runId)
+    return run ? { run, steps: getPipelineSteps(runId) } : null
+  })
+  ipcMain.handle('pipeline:active', (_, taskId: string) => activeRunId(taskId))
+  ipcMain.handle('pipeline:cancel', (_, taskId: string) => cancelRun(taskId))
 
   // --- Sidecar console (plain shell in the task's worktree, no agent logic) ---
   ipcMain.handle('console:open', (_, { taskId, cols, rows }: { taskId: string; cols: number; rows: number }) => {

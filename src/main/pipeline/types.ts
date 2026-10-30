@@ -121,3 +121,61 @@ export interface StepOutput {
 }
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+
+export type RunEvent =
+  | { type: 'run.started'; runId: string }
+  | { type: 'step.started'; runId: string; stepId: string; nodeId: string; activation: number }
+  | { type: 'step.completed'; runId: string; stepId: string; nodeId: string; output: StepOutput }
+  | { type: 'loop.exhausted'; runId: string; edgeId: string }
+  | { type: 'run.completed'; runId: string; status: RunStatus; error?: string }
+
+export interface ValidationIssue {
+  /** An error blocks saving; a warning is shown but allowed. */
+  level: 'error' | 'warning'
+  code:
+    | 'anchor-count'
+    | 'duplicate-id'
+    | 'dangling-edge'
+    | 'multiple-entries'
+    | 'unreachable'
+    | 'loop-limit'
+    | 'exhausted-target'
+    | 'missing-default'
+    | 'multiple-defaults'
+    | 'default-without-conditions'
+    | 'condition-and-default'
+    | 'pre-current-session'
+    | 'parallel-current-session'
+    | 'parallel-merge'
+    | 'join-inputs'
+    | 'node-config'
+  message: string
+  nodeIds?: string[]
+  edgeIds?: string[]
+}
+
+export interface PipelineRunRow {
+  id: string
+  task_id: string
+  pipeline_id: string | null
+  message_id: string | null
+  input: string
+  /** The graph as it was when the run started — the pipeline may have been edited since. */
+  graph_json: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  error: string | null
+  started_at: number
+  completed_at: number | null
+}
+
+export interface PipelineStepRow {
+  id: string
+  run_id: string
+  node_id: string
+  activation: number
+  status: 'running' | 'ok' | 'error' | 'cancelled'
+  /** JSON of the step's `StepOutput`. */
+  output_json: string | null
+  started_at: number
+  completed_at: number | null
+}

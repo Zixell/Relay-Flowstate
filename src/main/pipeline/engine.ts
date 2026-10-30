@@ -2,7 +2,9 @@ import { evaluate } from './conditions'
 import { isRouted, sessionOf, type GraphAnalysis } from './graph'
 import { render, type TemplateScope } from './template'
 import { validate } from './validate'
-import type { PipelineEdge, PipelineGraph, PipelineNode, RunStatus, StepOutput } from './types'
+import type { PipelineEdge, PipelineGraph, PipelineNode, RunEvent, RunStatus, StepOutput } from './types'
+
+export type { RunEvent }
 
 /** Executes one block. Templates in the block are already filled in. */
 export interface StepRunner {
@@ -18,13 +20,6 @@ export interface StepContext {
   /** How many times this block ran before in this run. */
   activation: number
 }
-
-export type RunEvent =
-  | { type: 'run.started'; runId: string }
-  | { type: 'step.started'; runId: string; stepId: string; nodeId: string; activation: number }
-  | { type: 'step.completed'; runId: string; stepId: string; nodeId: string; output: StepOutput }
-  | { type: 'loop.exhausted'; runId: string; edgeId: string }
-  | { type: 'run.completed'; runId: string; status: RunStatus; error?: string }
 
 export interface RunOptions {
   runId: string

@@ -17,7 +17,8 @@ import {
   XCircle,
   Square,
   X,
-  ArrowDown
+  ArrowDown,
+  Workflow
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
@@ -30,6 +31,7 @@ import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
 import { HandoffDivider, LimitBanner, hitUsageLimit, resumeAtOf } from './AgentSwitch'
 import { SignInBanner, needsSignIn } from './SignInBanner'
+import { PipelineRunCard } from './PipelineRunCard'
 
 function Thinking({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
@@ -91,6 +93,12 @@ function UserBubble({ message, onOpenImage }: { message: ChatMessage; onOpenImag
 
   return (
     <div className="flex flex-col items-end gap-1.5">
+      {message.kind === 'pipeline_prompt' && (
+        <span className="flex items-center gap-1 text-[11px] text-violet-300/70">
+          <Workflow className="w-3 h-3" />
+          Sent by the pipeline
+        </span>
+      )}
       {attachments.length > 0 && (
         <div className="flex flex-wrap justify-end gap-1.5 max-w-[85%]">
           {attachments.map((a) => (
@@ -615,6 +623,10 @@ export function ChatView({ task, compact }: Props) {
         return <PermissionPrompt message={m} onRespond={respondPermission} active={m.id === lastPendingPermission} />
       case 'handoff':
         return <HandoffDivider content={m.content} />
+      case 'pipeline':
+        return <PipelineRunCard message={m} />
+      case 'pipeline_prompt':
+        return <UserBubble message={m} onOpenImage={setViewerSrc} />
       case 'error':
         return (
           <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-[12px] text-red-300">

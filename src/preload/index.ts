@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { Pipeline, PipelineGraph, PipelineRunRow, PipelineStepRow, RunEvent, ValidationIssue } from '../main/pipeline/types'
 
 /** Where an app update stands (see main/updater.ts). */
 interface UpdateState {
@@ -184,6 +185,26 @@ const api = {
     /** A targetBranch that does not exist yet is created from the branch the task's worktree came from. */
     commitAndMerge: (taskId: string, worktreeCwd: string, projectCwd: string, targetBranch: string, commitMessage: string) =>
       ipcRenderer.invoke('git:commitAndMerge', { taskId, worktreeCwd, projectCwd, targetBranch, commitMessage })
+  },
+
+  // Pipelines around chat messages (docs/pipeline-design.md); taskId null is the global pipeline
+  pipelines: {
+    get: (taskId: string | null): Promise<Pipeline | null> => ipcRenderer.invoke('pipeline:get', taskId),
+    /** Saves a valid pipeline; returns its issues — with an error among them nothing was saved. */
+    save: (pipeline: Pipeline): Promise<ValidationIssue[]> => ipcRenderer.invoke('pipeline:save', pipeline),
+    delete: (taskId: string | null) => ipcRenderer.invoke('pipeline:delete', taskId),
+    validate: (graph: PipelineGraph): Promise<ValidationIssue[]> => ipcRenderer.invoke('pipeline:validate', graph),
+    run: (runId: string): Promise<{ run: PipelineRunRow; steps: PipelineStepRow[] } | null> => ipcRenderer.invoke('pipeline:run', runId),
+    /** The task's running run, if any. */
+    active: (taskId: string): Promise<string | null> => ipcRenderer.invoke('pipeline:active', taskId),
+    cancel: (taskId: string) => ipcRenderer.invoke('pipeline:cancel', taskId),
+    onEvent: (taskId: string, callback: (event: RunEvent) => void) => {
+      const listener = (_: Electron.IpcRendererEvent, event: RunEvent) => callback(event)
+      ipcRenderer.on(`pipeline:event:${taskId}`, listener)
+      return () => {
+        ipcRenderer.removeListener(`pipeline:event:${taskId}`, listener)
+      }
+    }
   },
 
   // Chat mode (structured agent sessions)

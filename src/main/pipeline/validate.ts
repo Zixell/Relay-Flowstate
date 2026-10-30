@@ -1,30 +1,7 @@
 import { analyze, sessionOf, type GraphAnalysis } from './graph'
-import type { PipelineGraph, PipelineNode } from './types'
+import type { PipelineGraph, PipelineNode, ValidationIssue } from './types'
 
-export interface ValidationIssue {
-  /** An error blocks saving; a warning is shown but allowed. */
-  level: 'error' | 'warning'
-  code:
-    | 'anchor-count'
-    | 'duplicate-id'
-    | 'dangling-edge'
-    | 'multiple-entries'
-    | 'unreachable'
-    | 'loop-limit'
-    | 'exhausted-target'
-    | 'missing-default'
-    | 'multiple-defaults'
-    | 'default-without-conditions'
-    | 'condition-and-default'
-    | 'pre-current-session'
-    | 'parallel-current-session'
-    | 'parallel-merge'
-    | 'join-inputs'
-    | 'node-config'
-  message: string
-  nodeIds?: string[]
-  edgeIds?: string[]
-}
+export type { ValidationIssue }
 
 export interface ValidationResult {
   ok: boolean
@@ -194,6 +171,8 @@ function reachesThrough(a: GraphAnalysis, from: string, to: string): boolean {
 function configProblem(node: PipelineNode): string | null {
   switch (node.type) {
     case 'agent':
+      if (!node.prompt.trim()) return 'the prompt is empty'
+      return node.agent && node.session === 'current' ? 'another agent can only run in a new session' : null
     case 'prompt':
       return node.prompt.trim() ? null : 'the prompt is empty'
     case 'tool':

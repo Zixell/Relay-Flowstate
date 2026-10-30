@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionSettings, SessionUsage, SlashCommandInfo, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionSettings, SessionUsage, SlashCommandInfo, TurnEndReason, UserInput } from '../agents/adapter'
 import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
@@ -68,7 +68,22 @@ interface LiveSession {
   lastText: string
   /** Set when the current turn ran into a usage limit; the value is when it resets, if known. */
   limitHit?: { resetsAt?: number }
+  /** Texts the agent wrote in the current turn, for whoever waits on it. */
+  turnTexts: string[]
+  /** Last error the agent reported in the current turn. */
+  turnError?: string
+  /** Waiting for the current turn to end (pipeline steps). */
+  turnWaiters: ((result: TurnResult) => void)[]
   unsubscribe: () => void
+}
+
+/** How a turn ended, for a pipeline step that ran it. */
+export interface TurnResult {
+  reason: TurnEndReason
+  /** What the agent wrote, message by message. */
+  texts: string[]
+  changedFiles: string[]
+  error?: string
 }
 
 /** What the renderer receives on `chat:event:<taskId>`. */
@@ -121,13 +136,38 @@ function emitToRenderer(taskId: string, payload: ChatEventPayload): void {
   send(`chat:event:${taskId}`, payload)
 }
 
+/** Tasks a pipeline run is working on: between its turns they are not done. */
+const pipelineBusy = new Set<string>()
+
+/** The status the task list shows: a finished turn of a running pipeline is not the end. */
+function shownStatus(taskId: string, status: TaskStatus): TaskStatus {
+  return pipelineBusy.has(taskId) && status === 'completed' ? 'running' : status
+}
+
 function setStatus(s: LiveSession, next: StatusState): void {
-  const prev = s.status.status
+  const prev = shownStatus(s.taskId, s.status.status)
   s.status = next
-  if (prev === next.status) return
-  updateTaskStatus(s.taskId, next.status, { runtime_seconds: getTurnsRuntimeSeconds(s.taskId) })
-  send('task:status', { taskId: s.taskId, status: next.status })
+  const shown = shownStatus(s.taskId, next.status)
+  if (prev === shown) return
+  updateTaskStatus(s.taskId, shown, { runtime_seconds: getTurnsRuntimeSeconds(s.taskId) })
+  send('task:status', { taskId: s.taskId, status: shown })
   setAttentionCount([...live.values()].filter((x) => x.status.status === 'waiting').length)
+}
+
+/** Marks the task as worked on by a pipeline; when it ends, `final` is the task's status. */
+export function setPipelineBusy(taskId: string, busy: boolean, final?: TaskStatus): void {
+  if (busy) pipelineBusy.add(taskId)
+  else pipelineBusy.delete(taskId)
+  const s = live.get(taskId)
+  const current = s?.status.status
+  const status: TaskStatus = busy ? (current === 'waiting' ? 'waiting' : 'running') : (final ?? current ?? 'completed')
+  if (s && !busy && final) s.status = { ...s.status, status: final }
+  updateTaskStatus(taskId, status)
+  send('task:status', { taskId, status })
+  if (!busy && (final === 'completed' || final === 'failed')) {
+    const task = getTaskById(taskId) as TaskRow | null
+    if (task) notifyTask(taskId, `${task.title} ${final === 'failed' ? 'failed' : 'finished'}`, `Pipeline ${final === 'failed' ? 'failed' : 'done'}`)
+  }
 }
 
 function loadTask(taskId: string): TaskRow {
@@ -166,6 +206,8 @@ async function ensureSession(taskId: string): Promise<LiveSession> {
     commands: agentCommands(task.process_type),
     lastText: '',
     background: [],
+    turnTexts: [],
+    turnWaiters: [],
     unsubscribe: () => {}
   }
   entry.unsubscribe = session.onEvent((e) => {
@@ -273,6 +315,8 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'turn.started': {
       s.turnId = e.turnId
+      s.turnTexts = []
+      s.turnError = undefined
       const before = snapshotWorkingTree(s.cwd, taskId, `${e.turnId}-before`) ?? undefined
       insertTurn({ id: e.turnId, task_id: taskId, commit_before: before })
       break
@@ -284,7 +328,14 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
 
     case 'message.completed':
       s.streaming.delete(e.messageId)
-      if (e.text.trim()) s.lastText = e.text
+      if (e.text.trim()) {
+        s.lastText = e.text
+        s.turnTexts.push(e.text)
+      }
+      break
+
+    case 'error':
+      s.turnError = e.message
       break
 
     case 'commands.updated': {
@@ -337,6 +388,7 @@ function handleEvent(s: LiveSession, e: AgentEvent): void {
     }
 
     case 'session.exited':
+      resolveTurn(s, { reason: 'error', texts: s.turnTexts, changedFiles: [], error: s.turnError ?? 'The agent exited' })
       setStatus(s, reduceStatus(s.status, e))
       failRunningTools(taskId)
       s.unsubscribe()
@@ -364,8 +416,10 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   completeTurn(e.turnId, { status, commit_after: after, usage_json: e.usage ? JSON.stringify(e.usage) : undefined, checkpoint: e.checkpoint })
 
   const changed = turn?.commit_before && after ? diffSnapshotFiles(s.cwd, turn.commit_before, after) : []
+  resolveTurn(s, { reason: e.reason, texts: s.turnTexts, changedFiles: changed.map((f) => f.path), error: s.turnError })
   // With subagents still working the turn only handed off; their own report finishes the task.
-  if (e.reason !== 'interrupted' && !(e.reason !== 'error' && s.status.agents > 0)) {
+  // A pipeline's turns are steps of it: the run says when it is done.
+  if (e.reason !== 'interrupted' && !(e.reason !== 'error' && s.status.agents > 0) && !pipelineBusy.has(taskId)) {
     const title = loadTask(taskId).title
     notifyTask(
       taskId,
@@ -391,6 +445,12 @@ function finishTurn(s: LiveSession, e: AgentEvent & { type: 'turn.completed' }):
   } catch (err) {
     console.warn('[relay] could not count changed files:', err)
   }
+}
+
+function resolveTurn(s: LiveSession, result: TurnResult): void {
+  const waiters = s.turnWaiters
+  s.turnWaiters = []
+  for (const w of waiters) w(result)
 }
 
 // --- Public API (used by IPC handlers) --------------------------------------
@@ -444,31 +504,104 @@ export async function sendMessage(taskId: string, input: UserInput): Promise<Mes
   // A message from the user (or the auto-continue itself) replaces a pending continuation
   cancelResume(taskId)
   const s = await ensureSession(taskId)
+  const message = recordUserMessage(taskId, input)
+  await deliver(s, input)
+  return message
+}
+
+/** Puts what the user typed into the chat, without sending it to the agent yet. */
+export function recordUserMessage(taskId: string, input: UserInput, kind: 'text' | 'pipeline_prompt' = 'text'): MessageRow | undefined {
   const attachments = (input.images ?? []).map((img) => saveAttachment(taskId, img))
   const message = insertMessage({
     id: randomUUID(),
     task_id: taskId,
-    turn_id: s.turnId,
+    turn_id: live.get(taskId)?.turnId ?? null,
     role: 'user',
-    kind: 'text',
+    kind,
     content: input.text,
     attachments
   })
   if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { userMessage: true } }, message })
+  return message
+}
 
+async function deliver(s: LiveSession, input: UserInput): Promise<void> {
   // First message to an agent that took the task over: it gets the story so far
   // in front of it. The chat shows only what the user typed.
-  const task = loadTask(taskId)
+  const task = loadTask(s.taskId)
   const handoff = readHandoff(task.metadata)
   if (handoff?.pending) {
-    const context = buildHandoffContext(taskId, handoff)
+    const context = buildHandoffContext(s.taskId, handoff)
     await s.session.send({ ...input, text: `${context}\n\nThe user's message:\n${input.text}` })
     const meta = JSON.parse(task.metadata ?? '{}')
-    updateTaskMetadata(taskId, { ...meta, handoff: { ...handoff, pending: false } })
-    return message
+    updateTaskMetadata(s.taskId, { ...meta, handoff: { ...handoff, pending: false } })
+    return
   }
   await s.session.send(input)
-  return message
+}
+
+/**
+ * Runs one turn in the task's session for a pipeline step and waits for it to
+ * end. A turn already going is waited out first. With `show`, the prompt
+ * appears in the chat as sent by the pipeline. Aborting interrupts the turn.
+ */
+export async function runTurn(
+  taskId: string,
+  input: UserInput,
+  opts: { show?: boolean; signal?: AbortSignal } = {}
+): Promise<TurnResult> {
+  const interrupted: TurnResult = { reason: 'interrupted', texts: [], changedFiles: [] }
+  let s = await ensureSession(taskId)
+  while (s.status.inTurn) {
+    await new Promise<TurnResult>((resolve) => s.turnWaiters.push(resolve))
+    if (opts.signal?.aborted) return interrupted
+    s = await ensureSession(taskId)
+  }
+  if (opts.signal?.aborted) return interrupted
+  cancelResume(taskId)
+  if (opts.show) recordUserMessage(taskId, input, 'pipeline_prompt')
+  const done = new Promise<TurnResult>((resolve) => {
+    s.turnWaiters.push(resolve)
+    opts.signal?.addEventListener(
+      'abort',
+      () => {
+        void s.session.interrupt().catch(() => {})
+        resolve(interrupted)
+      },
+      { once: true }
+    )
+  })
+  await deliver(s, input)
+  return done
+}
+
+/** Permission prompts of a pipeline step's own session, answered from the task's chat. */
+const sidePermissions = new Map<string, AgentSession>()
+
+/** Shows a permission prompt (or its answer) from a session that is not the task's own. */
+export function showSidePermission(
+  taskId: string,
+  session: AgentSession,
+  e: Extract<AgentEvent, { type: 'permission.requested' | 'permission.resolved' }>
+): void {
+  if (e.type === 'permission.requested') {
+    sidePermissions.set(e.requestId, session)
+    notifyTask(taskId, `${loadTask(taskId).title} needs approval`, e.title)
+  } else {
+    sidePermissions.delete(e.requestId)
+  }
+  const message = persistEvent(taskId, live.get(taskId)?.turnId ?? null, e)
+  emitToRenderer(taskId, { event: e, message })
+}
+
+/** Prompts of a side session that ended: nobody can answer them anymore. */
+export function expireSidePermissions(taskId: string, session: AgentSession): void {
+  for (const [requestId, owner] of sidePermissions) {
+    if (owner !== session) continue
+    sidePermissions.delete(requestId)
+    const message = updateMessage(requestId, { tool_status: 'expired' })
+    if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { expired: requestId } }, message })
+  }
 }
 
 /**
@@ -525,6 +658,8 @@ export async function interrupt(taskId: string): Promise<void> {
 }
 
 export function respondPermission(taskId: string, requestId: string, optionId: string, answers?: QuestionAnswers): void {
+  const side = sidePermissions.get(requestId)
+  if (side) return side.respondPermission(requestId, optionId, answers)
   live.get(taskId)?.session.respondPermission(requestId, optionId, answers)
 }
 
