@@ -1,12 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Terminal, CheckCircle2, XCircle, FileText, Info, Gauge, RefreshCw, Download, LogIn, Workflow } from 'lucide-react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription
-} from '../ui/dialog'
+import { CheckCircle2, XCircle, FileText, Info, RefreshCw, Download, LogIn, Workflow, SlidersHorizontal } from 'lucide-react'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
@@ -87,11 +81,15 @@ function SettingRow({ def, value, onChange }: { def: AgentSettingDef; value: Set
   )
 }
 
+type SectionId = 'general' | 'pipelines' | 'about' | `agent:${string}`
+
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const agents = useAppStore((s) => s.agents)
   const loadAgents = useAppStore((s) => s.loadAgents)
   // Values of every agent-declared setting, keyed by settings key
   const [values, setValues] = useState<Record<string, SettingValue>>({})
+  // Kept while the app runs, so Settings reopens where it was left
+  const [section, setSection] = useState<SectionId>('general')
 
   const selectable = agents.filter((a) => a.enabled)
 
@@ -122,112 +120,172 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     if (isElectron) window.api.settings.set(key, String(next))
   }, [])
 
-  const anySummaryAgent = selectable.some((a) => a.supportsSummaries && a.available)
+  const agent = section.startsWith('agent:') ? selectable.find((a) => `agent:${a.id}` === section) : undefined
+  const current: SectionId = section.startsWith('agent:') && !agent ? 'general' : section
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-          <DialogDescription>
-            Relay Flowstate configuration and integration status.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-5 px-6 pb-6 pt-1 max-h-[70vh] overflow-y-auto">
-
-          <UpdatesSection />
-
-          <div className="h-px bg-white/[0.05]" />
-
-          {/* General */}
-          <div className="flex flex-col gap-3">
-            {GENERAL_SETTINGS.map((def) => (
-              <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onChange={change} />
+      <DialogContent className="max-w-4xl p-0 overflow-hidden">
+        <div className="flex h-[min(680px,85vh)]">
+          <nav className="w-56 shrink-0 flex flex-col gap-0.5 p-3 border-r border-white/[0.06] bg-black/20 overflow-y-auto">
+            <DialogTitle className="px-2 pt-1 pb-3">Settings</DialogTitle>
+            <DialogDescription className="sr-only">Relay Flowstate configuration and integration status.</DialogDescription>
+            <NavItem active={current === 'general'} onClick={() => setSection('general')} icon={<SlidersHorizontal className="w-3.5 h-3.5" />}>
+              General
+            </NavItem>
+            <NavItem active={current === 'pipelines'} onClick={() => setSection('pipelines')} icon={<Workflow className="w-3.5 h-3.5" />}>
+              Pipelines
+            </NavItem>
+            <p className="px-2 pt-4 pb-1 text-[10.5px] uppercase tracking-wide text-zinc-600">Agents</p>
+            {selectable.map((a) => (
+              <NavItem
+                key={a.id}
+                active={current === `agent:${a.id}`}
+                onClick={() => setSection(`agent:${a.id}`)}
+                icon={<span className="w-2 h-2 rounded-full" style={{ backgroundColor: a.color }} />}
+                muted={!a.available}
+              >
+                {a.label}
+              </NavItem>
             ))}
-          </div>
+            <div className="flex-1" />
+            <NavItem active={current === 'about'} onClick={() => setSection('about')} icon={<Info className="w-3.5 h-3.5" />}>
+              About & updates
+            </NavItem>
+          </nav>
 
-          <GlobalPipelineRow />
-
-          <UsageLimits agents={selectable.filter((a) => a.available && a.chat?.limits)} open={open} />
-
-          <div className="h-px bg-white/[0.05]" />
-
-          {/* Agent CLI status */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">Agents & accounts</span>
-            </div>
-            <p className="text-xs text-zinc-500 leading-relaxed">
-              Agents run through your own installed CLI and its account. Sign in here
-              instead of the agent's terminal. Session summaries are generated locally
-              by whichever agent CLI is installed.
-            </p>
-
-            <div className="flex flex-col gap-2">
-              {selectable.map((agent) => (
-                <AgentStatusRow key={agent.id} agent={agent} open={open} />
-              ))}
-            </div>
-          </div>
-
-          <div className="h-px bg-white/[0.05]" />
-
-          {/* Summary behaviour */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <FileText className="w-3.5 h-3.5 text-zinc-400" />
-              <span className="text-sm font-medium text-zinc-200">Summary Generation</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {[
-                'Written only when you press Recap in a task',
-                'Runs the agent CLI headlessly in the background (no terminal window)',
-                'One recap per task — each one builds on the previous',
-                anySummaryAgent
-                  ? 'Falls back to a git-based summary if the CLI call fails'
-                  : 'No agent CLI detected — summaries fall back to git history'
-              ].map((item) => (
-                <div key={item} className="flex items-start gap-2 text-xs text-zinc-400">
-                  <Info className="w-3 h-3 text-zinc-600 mt-0.5 shrink-0" />
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Per-agent launch options, declared by each agent definition */}
-          {selectable
-            .filter((a) => a.settings.length > 0)
-            .map((agent) => (
-              <React.Fragment key={agent.id}>
-                <div className="h-px bg-white/[0.05]" />
+          <div className="flex-1 min-w-0 overflow-y-auto px-8 py-6">
+            {current === 'general' && (
+              <Section title="General" description="How the app behaves around your tasks.">
                 <div className="flex flex-col gap-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: agent.color }}
-                    />
-                    <span className="text-sm font-medium text-zinc-200">
-                      {agent.label} Launch Options
-                    </span>
-                  </div>
-
-                  {agent.settings.map((def) => (
+                  {GENERAL_SETTINGS.map((def) => (
                     <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onChange={change} />
                   ))}
                 </div>
-              </React.Fragment>
-            ))}
+                <RecapInfo anyAgent={selectable.some((a) => a.supportsSummaries && a.available)} />
+              </Section>
+            )}
 
+            {current === 'pipelines' && (
+              <Section title="Pipelines" description="Steps that run around chat messages: reviews, commits, fix loops, notifications.">
+                <GlobalPipelineRow />
+                <p className="text-[11.5px] text-zinc-500 leading-relaxed">
+                  A task can have its own pipeline instead — set it up in the task's <span className="text-zinc-300">Pipeline</span> tab, where its runs are listed too.
+                </p>
+              </Section>
+            )}
+
+            {agent && (
+              <Section
+                title={agent.label}
+                description={agent.description}
+                icon={<span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: agent.color }} />}
+              >
+                <SubHeading>Account</SubHeading>
+                <p className="text-[11.5px] text-zinc-500 leading-relaxed -mt-2">
+                  {agent.label} runs through your own installed CLI and its account. Sign in here instead of the agent's terminal.
+                </p>
+                <AgentStatusRow agent={agent} open={open} />
+                {agent.available && agent.chat?.limits && (
+                  <>
+                    <SubHeading>Usage limits</SubHeading>
+                    <UsageLimits agents={[agent]} open={open} />
+                  </>
+                )}
+                <SubHeading>Launch options</SubHeading>
+                {agent.settings.length ? (
+                  <div className="flex flex-col gap-3">
+                    {agent.settings.map((def) => (
+                      <SettingRow key={def.key} def={def} value={values[def.key] ?? def.default} onChange={change} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11.5px] text-zinc-500 -mt-2">{agent.label} has no launch options in Relay.</p>
+                )}
+              </Section>
+            )}
+
+            {current === 'about' && (
+              <Section title="About & updates" description="The app's version and updates from the GitHub releases.">
+                <UpdatesSection />
+              </Section>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
   )
 }
 
-/** The app's version and its update from the GitHub releases. */
+function NavItem({
+  active,
+  onClick,
+  icon,
+  muted,
+  children
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  muted?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex items-center gap-2.5 h-8 px-2 rounded-md text-left text-[12.5px] transition-colors',
+        active ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]',
+        muted && !active && 'text-zinc-600'
+      )}
+    >
+      <span className="w-3.5 flex items-center justify-center shrink-0 text-zinc-500">{icon}</span>
+      <span className="truncate">{children}</span>
+    </button>
+  )
+}
+
+function Section({ title, description, icon, children }: { title: string; description?: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 max-w-xl">
+      <div className="pr-8">
+        <h3 className="flex items-center gap-2 text-[15px] font-semibold text-zinc-100">
+          {icon}
+          {title}
+        </h3>
+        {description && <p className="text-[12px] text-zinc-500 mt-1 leading-relaxed">{description}</p>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return <p className="pt-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">{children}</p>
+}
+
+function RecapInfo({ anyAgent }: { anyAgent: boolean }) {
+  return (
+    <>
+      <SubHeading>Recaps</SubHeading>
+      <div className="flex flex-col gap-2 -mt-1">
+        {[
+          'Written only when you press Recap in a task',
+          'Runs the agent CLI headlessly in the background (no terminal window)',
+          'One recap per task — each one builds on the previous',
+          anyAgent ? 'Falls back to a git-based summary if the CLI call fails' : 'No agent CLI detected — summaries fall back to git history'
+        ].map((item) => (
+          <div key={item} className="flex items-start gap-2 text-xs text-zinc-400">
+            <FileText className="w-3 h-3 text-zinc-600 mt-0.5 shrink-0" />
+            {item}
+          </div>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** Opens the global pipeline's editor. */
 function GlobalPipelineRow() {
   const openGlobalPipeline = useAppStore((s) => s.openGlobalPipeline)
   return (
@@ -236,7 +294,7 @@ function GlobalPipelineRow() {
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-zinc-200 leading-snug">Global pipeline</p>
         <p className="text-[11px] text-zinc-500 leading-relaxed mt-1">
-          Steps around every chat message — review, commit, fix loops — for tasks without a pipeline of their own.
+          Runs around every chat message of tasks that have no pipeline of their own.
         </p>
       </div>
       <button
@@ -249,6 +307,7 @@ function GlobalPipelineRow() {
   )
 }
 
+/** The app's version and its update from the GitHub releases. */
 function UpdatesSection() {
   const u = useUpdates()
   if (!u) return null
@@ -346,13 +405,7 @@ function UsageLimits({ agents, open }: { agents: AgentDescriptor[]; open: boolea
 
   if (!agents.length) return null
   return (
-    <>
-      <div className="h-px bg-white/[0.05]" />
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <Gauge className="w-3.5 h-3.5 text-zinc-400" />
-          <span className="text-sm font-medium text-zinc-200">Usage limits</span>
-        </div>
+    <div className="flex flex-col gap-3">
         {agents.map((agent) => {
           const entry = limits[agent.id]
           const busy = loading.has(agent.id)
@@ -403,8 +456,7 @@ function UsageLimits({ agents, open }: { agents: AgentDescriptor[]; open: boolea
             </div>
           )
         })}
-      </div>
-    </>
+    </div>
   )
 }
 
