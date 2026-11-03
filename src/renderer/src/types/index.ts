@@ -256,7 +256,7 @@ export interface ChatMessage {
   seq: number
   role: 'user' | 'assistant' | 'tool' | 'system'
   /** `pipeline` is a pipeline run's card; `pipeline_prompt` a message a pipeline sent to the session. */
-  kind: 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff' | 'pipeline' | 'pipeline_prompt'
+  kind: 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff' | 'pipeline' | 'pipeline_prompt' | 'usage'
   content: string | null
   tool_call_id: string | null
   tool_status: string | null

@@ -121,7 +121,18 @@ export function Composer({
     }
   }
 
-  const [text, setText] = useState('')
+  // Each chat keeps its own unsent text, across task switches and restarts
+  const draftKey = taskId ? `relay:draft:${taskId}` : null
+  const [text, setTextState] = useState(() => (draftKey && localStorage.getItem(draftKey)) || '')
+  const setText = useCallback(
+    (value: string) => {
+      setTextState(value)
+      if (!draftKey) return
+      if (value) localStorage.setItem(draftKey, value)
+      else localStorage.removeItem(draftKey)
+    },
+    [draftKey]
+  )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const settingDefs = onSessionSetting && taskId ? capabilities?.sessionSettings : undefined
   const [caret, setCaret] = useState(0)
@@ -203,6 +214,12 @@ export function Composer({
       ? suggestion.slice(text.length)
       : null
 
+  useEffect(() => {
+    setTextState((draftKey && localStorage.getItem(draftKey)) || '')
+    setCaret(0)
+    requestAnimationFrame(resize)
+  }, [draftKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const resize = (): void => {
     const el = ref.current
     if (!el) return
@@ -225,7 +242,7 @@ export function Composer({
     setCaret(0)
     setImages([])
     requestAnimationFrame(resize)
-  }, [text, images, onSend, settingDefs])
+  }, [text, images, onSend, settingDefs, setText])
 
   const addFiles = async (files: FileList | File[]): Promise<void> => {
     const imgs = [...files].filter((f) => f.type.startsWith('image/'))

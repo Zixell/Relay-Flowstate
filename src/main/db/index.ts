@@ -508,7 +508,7 @@ export function resetRunningTurns(): void {
 // --- Chat: messages ---
 export type MessageRole = 'user' | 'assistant' | 'tool' | 'system'
 /** `pipeline` is a pipeline run's card (content `{ runId }`); `pipeline_prompt` a message a pipeline sent to the session. */
-export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff' | 'pipeline' | 'pipeline_prompt'
+export type MessageKind = 'text' | 'thinking' | 'tool_call' | 'permission' | 'plan' | 'error' | 'handoff' | 'pipeline' | 'pipeline_prompt' | 'usage'
 
 export interface MessageRow {
   id: string

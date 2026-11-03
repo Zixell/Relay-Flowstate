@@ -264,6 +264,8 @@ const api = {
       ipcRenderer.invoke('chat:history', { taskId, ...opts }),
     live: (taskId: string) => ipcRenderer.invoke('chat:live', taskId),
     /** Data URL of an image attached to a user message, or null if it is gone. */
+    /** `/usage`: adds a usage card to the chat. */
+    usage: (taskId: string) => ipcRenderer.invoke('chat:usage', taskId),
     attachment: (taskId: string, id: string): Promise<string | null> =>
       ipcRenderer.invoke('chat:attachment', { taskId, id }),
     onEvent: (taskId: string, callback: (payload: unknown) => void) => {

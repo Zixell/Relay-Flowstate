@@ -55,7 +55,8 @@ import {
   stopBackgroundTask,
   setSessionSetting,
   sessionSettingOptions,
-  recapTask
+  recapTask,
+  showUsage
 } from '../session/manager'
 import type { UserInput } from '../agents/adapter'
 import { readAttachment, deleteAttachments } from '../session/attachments'
@@ -330,6 +331,7 @@ export function registerIpcHandlers(): void {
     const task = getTaskById(taskId) as { worktree_path?: string; project_path: string } | null
     return task ? suggestFiles(task.worktree_path || task.project_path, query) : []
   })
+  ipcMain.handle('chat:usage', (_, taskId: string) => showUsage(taskId))
   ipcMain.handle('chat:attachment', (_, { taskId, id }: { taskId: string; id: string }) => readAttachment(taskId, id))
 
   // --- Pipelines (docs/pipeline-design.md); taskId null is the global pipeline ---

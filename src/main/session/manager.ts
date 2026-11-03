@@ -2,7 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionSettings, SessionUsage, SlashCommandInfo, TurnEndReason, UserInput } from '../agents/adapter'
+import type { AgentEvent, AgentSession, BackgroundTask, PlanItem, QuestionAnswers, SessionSettings, SessionUsage, SlashCommandInfo, TurnEndReason, UsageReport, UserInput } from '../agents/adapter'
 import { getAgent, isAgentAvailable } from '../agents'
 import { buildHandoffContext, readHandoff, type HandoffInfo } from './handoff'
 import {
@@ -674,6 +674,44 @@ export async function switchAgent(taskId: string, agentId: string): Promise<unkn
     content: `Continued with ${to.label} (was ${from.label})`
   })
   return getTaskById(taskId)
+}
+
+/**
+ * `/usage` in a chat: the account's plan limits and what used them, as a card
+ * in the conversation. Answered by the app, so it works between turns and for
+ * every agent that can read its limits.
+ */
+export async function showUsage(taskId: string): Promise<MessageRow | undefined> {
+  const task = loadTask(taskId)
+  const agent = getAgent(task.process_type)
+  let report: UsageReport | null = null
+  let error: string | undefined
+  try {
+    if (agent.chat.readUsage) report = await agent.chat.readUsage()
+    else if (agent.chat.readLimits) {
+      const limits = await agent.chat.readLimits()
+      report = limits ? { limits } : null
+    }
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err)
+  }
+  if (report?.limits.length) recordLimits(agent.id, report.limits, true)
+  const session = usageByTask.get(taskId)
+  const message = insertMessage({
+    id: randomUUID(),
+    task_id: taskId,
+    role: 'system',
+    kind: 'usage',
+    content: JSON.stringify({
+      agent: agent.label,
+      report,
+      error,
+      session: session ? { costUsd: session.costUsd, contextUsed: session.contextUsed, contextSize: session.contextSize } : undefined,
+      at: Date.now()
+    })
+  })
+  if (message) emitToRenderer(taskId, { event: { type: 'raw', payload: { usage: true } }, message })
+  return message
 }
 
 export async function interrupt(taskId: string): Promise<void> {

@@ -119,6 +119,25 @@ export interface RateLimitInfo {
   status?: 'ok' | 'warning' | 'blocked'
 }
 
+/** What `/usage` shows: the plan, its limits and, when the agent can tell, what used them. */
+export interface UsageReport {
+  /** e.g. "Max", "Pro". */
+  plan?: string
+  limits: RateLimitInfo[]
+  /** The last day and the last week of local sessions. */
+  activity?: UsageActivity[]
+}
+
+export interface UsageActivity {
+  label: string
+  requests: number
+  sessions: number
+  /** The agent's advice on what drives usage, biggest first; `pct` is the share it concerns. */
+  tips: { pct: number; title: string; detail?: string }[]
+  /** Top skills, subagents, MCP servers, plugins by share. */
+  top: { label: string; items: { name: string; pct: number }[] }[]
+}
+
 /** Session-wide usage, as last reported by the agent. */
 export interface SessionUsage {
   /** Tokens currently in the context window. */
@@ -269,6 +288,8 @@ export interface ChatSupport {
   peek?: (ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model'>) => Promise<{ commands?: SlashCommandInfo[]; usage?: SessionUsage }>
   /** The account's plan limits (5-hour, weekly), read without running a turn; null when they do not apply. */
   readLimits?: () => Promise<RateLimitInfo[] | null>
+  /** The full `/usage` report; agents without one fall back to `readLimits`. */
+  readUsage?: () => Promise<UsageReport | null>
 }
 
 /** Small event emitter shared by adapters. */

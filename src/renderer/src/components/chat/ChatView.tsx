@@ -23,7 +23,7 @@ import {
 import { cn } from '../../lib/utils'
 import { useChat } from '../../hooks/useChat'
 import { useAppStore } from '../../stores/appStore'
-import type { BackgroundTask, ChatMessage, PlanItem, SessionUsage, Task, TurnInfo } from '../../types'
+import type { BackgroundTask, ChatMessage, PlanItem, SessionUsage, SlashCommandInfo, Task, TurnInfo } from '../../types'
 import { Markdown } from './Markdown'
 import { ToolCallCard } from './ToolCallCard'
 import { PermissionPrompt } from './PermissionPrompt'
@@ -31,6 +31,7 @@ import { Composer } from './Composer'
 import { TurnChanges } from './TurnChanges'
 import { HandoffDivider, LimitBanner, hitUsageLimit, resumeAtOf } from './AgentSwitch'
 import { SignInBanner, needsSignIn } from './SignInBanner'
+import { UsageCard } from './UsageCard'
 import { PipelineProgress } from './PipelineProgress'
 
 function Thinking({ text }: { text: string }) {
@@ -424,6 +425,16 @@ function BackgroundPanel({ taskId, tasks }: { taskId: string; tasks: BackgroundT
   )
 }
 
+/** Commands the app answers itself, offered for every agent; the agent's own versions give way. */
+const APP_COMMANDS: SlashCommandInfo[] = [
+  { name: 'usage', description: 'Plan limits and what uses them' },
+  { name: 'login', description: 'Sign in to the agent' }
+]
+
+function appCommands(commands: SlashCommandInfo[]): SlashCommandInfo[] {
+  return [...APP_COMMANDS, ...commands.filter((c) => !APP_COMMANDS.some((a) => a.name === c.name))]
+}
+
 interface Props {
   task: Task
   /** Tighter spacing for the floating chat window. */
@@ -538,10 +549,21 @@ export function ChatView({ task, compact }: Props) {
   }
 
   const openSignIn = useAppStore((s) => s.openSignIn)
+  const [readingUsage, setReadingUsage] = useState(false)
   const handleSend = useCallback(
     (text: string, images: { mediaType: string; data: string }[]) => {
       // The agents' own /login needs their terminal; the app signs in instead
       if (text.trim() === '/login' && !images.length) return openSignIn(task.process_type)
+      // /usage is answered by the app with a card, between turns too
+      if (text.trim() === '/usage' && !images.length) {
+        stickToBottom.current = true
+        setReadingUsage(true)
+        void window.api.chat
+          .usage(task.id)
+          .catch(() => {})
+          .finally(() => setReadingUsage(false))
+        return
+      }
       stickToBottom.current = true
       updateTask(task.id, { status: 'running', updated_at: Math.floor(Date.now() / 1000) })
       void send(text, images)
@@ -636,6 +658,8 @@ export function ChatView({ task, compact }: Props) {
         return <HandoffDivider content={m.content} />
       case 'pipeline_prompt':
         return <UserBubble message={m} onOpenImage={setViewerSrc} />
+      case 'usage':
+        return <UsageCard content={m.content} />
       case 'error':
         return (
           <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-[12px] text-red-300">
@@ -717,6 +741,12 @@ export function ChatView({ task, compact }: Props) {
               <Markdown text={state.streaming[id] ?? ''} />
             </div>
           ))}
+          {readingUsage && (
+            <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-500">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Reading usage…
+            </div>
+          )}
           {showWorking && (
             <div className="mt-4 flex items-center gap-2 text-[12px] text-zinc-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -736,7 +766,7 @@ export function ChatView({ task, compact }: Props) {
           <Composer
             inTurn={state.inTurn}
             capabilities={capabilities}
-            commands={state.commands}
+            commands={appCommands(state.commands)}
             taskId={task.id}
             suggestion={state.suggestion ?? handoffSuggestion}
             model={task.model}

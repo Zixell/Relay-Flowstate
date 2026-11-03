@@ -14,6 +14,8 @@ import type {
   QuestionAnswers,
   PlanItem,
   RateLimitInfo,
+  UsageActivity,
+  UsageReport,
   SessionContext,
   SessionHistory,
   SessionSettingDef,
@@ -1038,11 +1040,10 @@ async function peek(ctx: Pick<SessionContext, 'cwd' | 'resumeSessionId' | 'model
   }
 }
 
-/**
- * The plan limits behind the CLI's `/usage`, from a session that never sends
- * anything to the model. Null for API-key and cloud-provider logins.
- */
-async function readLimits(): Promise<RateLimitInfo[] | null> {
+type UsageResponse = Awaited<ReturnType<import('@anthropic-ai/claude-agent-sdk').Query['usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET']>>
+
+/** The data behind the CLI's `/usage`, from a session that never sends anything to the model. */
+async function fetchUsage(withActivity: boolean): Promise<UsageResponse> {
   const { query } = await loadSdk()
   const input = new InputQueue()
   const q = query({
@@ -1051,29 +1052,77 @@ async function readLimits(): Promise<RateLimitInfo[] | null> {
       cwd: homedir(),
       settingSources: [],
       pathToClaudeCodeExecutable: claudeExecutable(),
-      stderr: (data) => console.warn('[relay][claude limits]', data.trimEnd())
+      stderr: (data) => console.warn('[relay][claude usage]', data.trimEnd())
     }
   })
   try {
     // Experimental in the SDK; a failure leaves Settings on the last known values
-    const usage = await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })
-    if (!usage.rate_limits_available || !usage.rate_limits) return null
-    const limits: RateLimitInfo[] = []
-    for (const [key, label] of Object.entries(RATE_LIMIT_LABELS)) {
-      const w = (usage.rate_limits as Record<string, { utilization: number | null; resets_at: string | null } | null | undefined>)[key]
-      if (!w || w.utilization == null) continue
-      const used = Math.round(w.utilization)
-      limits.push({
+    return await q.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: !withActivity })
+  } finally {
+    input.close()
+    q.close()
+  }
+}
+
+type UsageWindow = { utilization: number | null; resets_at: string | null }
+
+/** The plan windows of a usage answer, per-model weekly ones included. Null for API-key and cloud-provider logins. */
+export function usageLimits(usage: Pick<UsageResponse, 'rate_limits_available' | 'rate_limits'>): RateLimitInfo[] | null {
+  if (!usage.rate_limits_available || !usage.rate_limits) return null
+  const windows: [string, UsageWindow | null | undefined][] = Object.keys(RATE_LIMIT_LABELS).map((key) => [
+    RATE_LIMIT_LABELS[key],
+    (usage.rate_limits as Record<string, UsageWindow | null | undefined>)[key]
+  ])
+  for (const m of usage.rate_limits.model_scoped ?? []) windows.push([`Weekly ${m.display_name}`, m])
+  return windows
+    .filter((e): e is [string, UsageWindow] => e[1]?.utilization != null)
+    .map(([label, w]) => {
+      const used = Math.round(w.utilization!)
+      return {
         label,
         usedPercent: used,
         resetsAt: w.resets_at ? Date.parse(w.resets_at) : undefined,
         status: used >= 100 ? 'blocked' : used >= 80 ? 'warning' : 'ok'
-      })
-    }
-    return limits
-  } finally {
-    input.close()
-    q.close()
+      }
+    })
+}
+
+const PLANS: Record<string, string> = { pro: 'Pro', max: 'Max', team: 'Team', enterprise: 'Enterprise' }
+
+type UsagePeriod = NonNullable<UsageResponse['behaviors']>['day'] & {
+  // Sent by current CLIs, not yet in the SDK's types
+  recommendations?: { pct: number; title: string; detail?: string }[]
+}
+
+/** One period of the "what is using your limits" part of `/usage`. */
+export function usageActivity(label: string, period: UsagePeriod): UsageActivity {
+  const top = [
+    { label: 'Skills', items: period.skills },
+    { label: 'Subagents', items: period.agents },
+    { label: 'MCP servers', items: period.mcp_servers },
+    { label: 'Plugins', items: period.plugins }
+  ].filter((t) => t.items.length)
+  return {
+    label,
+    requests: period.request_count,
+    sessions: period.session_count,
+    tips: (period.recommendations ?? []).map(({ pct, title, detail }) => ({ pct, title, detail })),
+    top: top.map((t) => ({ label: t.label, items: t.items.slice(0, 4).map(({ name, pct }) => ({ name, pct })) }))
+  }
+}
+
+async function readLimits(): Promise<RateLimitInfo[] | null> {
+  return usageLimits(await fetchUsage(false))
+}
+
+async function readUsage(): Promise<UsageReport | null> {
+  const usage = await fetchUsage(true)
+  const limits = usageLimits(usage)
+  const b = usage.behaviors
+  return {
+    plan: usage.subscription_type ? PLANS[usage.subscription_type] ?? usage.subscription_type : undefined,
+    limits: limits ?? [],
+    activity: b ? [usageActivity('Last 24 hours', b.day), usageActivity('Last 7 days', b.week)] : undefined
   }
 }
 
@@ -1093,5 +1142,6 @@ export const claudeChat: ChatSupport = {
   createSession: (ctx) => new ClaudeSession(ctx),
   history: claudeHistory,
   peek,
-  readLimits
+  readLimits,
+  readUsage
 }
