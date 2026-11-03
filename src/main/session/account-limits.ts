@@ -32,7 +32,11 @@ export function getAccountLimits(): Record<string, AccountLimits> {
 export function recordLimits(agentId: string, limits: RateLimitInfo[], replace = false): AccountLimits {
   const all = load()
   const byLabel = new Map((replace ? [] : (all[agentId]?.limits ?? [])).map((l) => [l.label, l]))
-  for (const l of limits) byLabel.set(l.label, l)
+  for (const l of limits) {
+    const prev = byLabel.get(l.label)
+    // A report without a number for the same window keeps the number known for it
+    byLabel.set(l.label, l.usedPercent == null && prev?.usedPercent != null && prev.resetsAt === l.resetsAt ? { ...l, usedPercent: prev.usedPercent } : l)
+  }
   const entry = { limits: [...byLabel.values()], updatedAt: Date.now() }
   all[agentId] = entry
   setSetting(KEY, JSON.stringify(all))

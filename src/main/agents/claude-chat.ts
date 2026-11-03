@@ -41,6 +41,7 @@ type PermissionUpdate = import('@anthropic-ai/claude-agent-sdk').PermissionUpdat
 type HookInput = import('@anthropic-ai/claude-agent-sdk').HookInput
 type ClaudeSettings = import('@anthropic-ai/claude-agent-sdk').Settings
 type HookJSONOutput = import('@anthropic-ai/claude-agent-sdk').HookJSONOutput
+type SDKRateLimitInfo = import('@anthropic-ai/claude-agent-sdk').SDKRateLimitInfo
 
 /** How long a question may wait for the user, in seconds (hooks time out after a minute by default). */
 const QUESTION_TIMEOUT_S = 24 * 60 * 60
@@ -143,6 +144,33 @@ const RATE_LIMIT_LABELS: Record<string, string> = {
   seven_day_opus: 'Weekly Opus',
   seven_day_sonnet: 'Weekly Sonnet',
   overage: 'Extra usage'
+}
+
+interface RateLimitWindow {
+  utilization?: number | null
+  resetsAt?: number | null
+  status?: string
+}
+
+/**
+ * The plan windows a rate_limit_event reports. Current CLIs list every window
+ * in `unifiedWindows` (utilization 0–1) and leave the top-level `utilization`
+ * out; reading only the top level recorded the 5-hour window without a number
+ * and never updated the weekly one.
+ */
+export function rateLimitWindows(info: SDKRateLimitInfo & { unifiedWindows?: Record<string, RateLimitWindow | null> }): RateLimitInfo[] {
+  const windows = Object.entries(info.unifiedWindows ?? {}).filter((e): e is [string, RateLimitWindow] => e[1] != null)
+  if (!windows.length && !info.rateLimitType) return []
+  const entries: [string, RateLimitWindow][] = windows.length ? windows : [[info.rateLimitType!, info]]
+  return entries.map(([key, w]) => {
+    const usedPercent = w.utilization != null ? Math.round(w.utilization * 100) : undefined
+    return {
+      label: RATE_LIMIT_LABELS[key] ?? key,
+      usedPercent,
+      resetsAt: w.resetsAt ? w.resetsAt * 1000 : undefined,
+      status: w.status === 'rejected' || (usedPercent ?? 0) >= 100 ? 'blocked' : w.status === 'allowed_warning' ? 'warning' : 'ok'
+    }
+  })
 }
 
 const MODELS = [
@@ -615,14 +643,7 @@ class ClaudeSession implements AgentSession {
         return
 
       case 'rate_limit_event': {
-        const info = msg.rate_limit_info
-        const label = info.rateLimitType ? RATE_LIMIT_LABELS[info.rateLimitType] ?? info.rateLimitType : 'Usage'
-        this.limits.set(label, {
-          label,
-          usedPercent: info.utilization != null ? Math.round(info.utilization * 100) : undefined,
-          resetsAt: info.resetsAt ? info.resetsAt * 1000 : undefined,
-          status: info.status === 'rejected' ? 'blocked' : info.status === 'allowed_warning' ? 'warning' : 'ok'
-        })
+        for (const limit of rateLimitWindows(msg.rate_limit_info)) this.limits.set(limit.label, limit)
         this.emit({ type: 'usage.updated', usage: { limits: [...this.limits.values()] } })
         return
       }
